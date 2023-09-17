@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{plugin_name}}</title>
+    <script src="https://cdn.jsdelivr.net/npm/imjoy-rpc@latest/dist/imjoy-rpc.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/imjoy-rpc@0.5.6/dist/hypha-rpc-websocket.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react/{{ react_version }}/umd/react.production.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/{{ react_dom_version }}/umd/react-dom.production.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/{{ babel_version }}/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body>
+<div id="{{ root_element }}"></div>
+<script>
+
+async function getService(){
+        // check the web page is running inside an iframe
+    const server = await hyphaWebsocketClient.connectToServer({"server_url": "http://localhost:9000"})
+    window.python = await server.getService("{{id}}")
+    console.log("python service: ", window.python);
+}
+
+getService();
+
+if (window.self !== window.top) {
+    imjoyRPC.setupRPC({name: '{{plugin_name}}'}).then((api)=>{
+        api.export({
+            setup(){
+                console.log("setup plugin");
+            },
+            run(ctx){
+                window.pythonFunctions = ctx.config.functions;
+                console.log("python functions: ", window.pythonFunctions);
+            }
+        })
+    }); 
+} else {
+    // The page is not in an iframe
+    console.log("The page is not in an iframe, imjoy rpc will not be available.");
+}
+
+function handleError(event) {
+    console.log('Captured uncaught error:', event);
+}
+window.addEventListener('error', handleError);
+</script>
+<script type="text/babel" data-presets="react">
+{{ jsx_script | safe }}
+</script>
+</body>
+</html>

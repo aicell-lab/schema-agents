@@ -1,0 +1,4 @@
+jsonschema
+shortuuid
+openai>=0.27.6
+pydantic
