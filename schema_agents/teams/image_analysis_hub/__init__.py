@@ -11,15 +11,17 @@ from schema_agents.teams.image_analysis_hub.data_engineer import create_data_eng
 from schema_agents.teams.image_analysis_hub.schemas import (GenerateUserForm, SoftwareRequirement, UserClarification,
                       UserRequirements)
 from schema_agents.teams.image_analysis_hub.web_developer import ReactUI, create_web_developer
-from schema_agents.teams.image_analysis_hub.microscopist import create_microscopist, MultiDimensionalAcquisitionConfig
+from schema_agents.teams.image_analysis_hub.microscopist import create_microscopist, MicroscopeControlRequirements
 
 async def show_message(client, message: Message):
     """Show message to the user."""
     await client.set_output(message.content)
 
-async def clarify_user_request(client, user_query: str, role: Role) -> UserClarification:
+async def clarify_user_request(client, user_query: str, role: Role) -> Union[UserClarification, MicroscopeControlRequirements]:
     """Clarify user request by prompting to the user with a form."""
-    config = await role.aask(user_query, GenerateUserForm)
+    config = await role.aask(user_query, Union[GenerateUserForm, MicroscopeControlRequirements])
+    if isinstance(config, MicroscopeControlRequirements):
+        return config
     fm = await client.show_dialog(
         src="https://oeway.github.io/imjoy-json-schema-form/",
         config={
@@ -31,9 +33,9 @@ async def clarify_user_request(client, user_query: str, role: Role) -> UserClari
     form = await fm.get_data()
     return UserClarification(form_data=str(form['formData']))
 
-async def create_user_requirements(req: UserClarification, role: Role) -> Union[MultiDimensionalAcquisitionConfig, UserRequirements]:
-    """Respond to user's requests after clarification."""
-    return await role.aask(req, Union[MultiDimensionalAcquisitionConfig, UserRequirements])
+async def create_user_requirements(req: UserClarification, role: Role) -> Union[MicroscopeControlRequirements, UserRequirements]:
+    """Respond to user's requests (can be control microscope or create software) after clarification."""
+    return await role.aask(req, Union[MicroscopeControlRequirements, UserRequirements])
 
 async def create_software_requirements(req: UserRequirements, role: Role) -> SoftwareRequirement:
     """Create software requirement."""

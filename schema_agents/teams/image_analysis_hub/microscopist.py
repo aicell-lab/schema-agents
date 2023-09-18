@@ -6,15 +6,15 @@ from schema_agents.role import Role
 from schema_agents.schema import Message
 from schema_agents.tools.code_interpreter import create_mock_client
 
-class MultiDimensionalAcquisitionConfig(BaseModel):
-    """Configuration for multi-dimensional acquisition."""
+class MicroscopeControlRequirements(BaseModel):
+    """Requirements for controlling the microscope and acquire images."""
     path: str = Field(default="", description="save images path")
     timeout: float = Field(default=0.0, description="timeout")
-    query: str = Field(default="", description="user's original request for acquiring multi-dimensional images")
-    plan: str = Field(default="", description="plan for acquiring multi-dimensional images")
+    query: str = Field(default="", description="user's original request")
+    plan: str = Field(default="", description="plan for control microscope and acquiring images")
 
 class MultiDimensionalAcquisitionScript(BaseModel):
-    """Python script for multi-dimensional acquisition.
+    """Python script for simple and complex multi-dimensional acquisition.
     In the script, you can use the following functions to control the microscope:
     - `microscope_move({'x': 0.0, 'y': 0.0, 'z': 0.0})` # x, y, z are in microns
     - `microscope_snap({'path': './images', 'exposure': 0.0})` # path is the path to save the image, exposure is in seconds
@@ -42,11 +42,11 @@ class Microscope():
         self.client = client
         self.initialized = False
 
-    async def plan(self, query: str=None, role: Role=None) -> MultiDimensionalAcquisitionConfig:
+    async def plan(self, query: str=None, role: Role=None) -> MicroscopeControlRequirements:
         """Make a plan for image acquisition tasks."""
-        return await role.aask(query, MultiDimensionalAcquisitionConfig)
+        return await role.aask(query, MicroscopeControlRequirements)
         
-    async def multi_dimensional_acquisition(self, config: MultiDimensionalAcquisitionConfig=None, role: Role=None) -> ExecutionResult:
+    async def multi_dimensional_acquisition(self, config: MicroscopeControlRequirements=None, role: Role=None) -> ExecutionResult:
         """Perform image acquisition by using Python script."""
         if not self.initialized:
             await self.client.execute_code(INIT_SCRIPT)

@@ -15,7 +15,7 @@ common_desc = {
 
 class GenerateUserForm(BaseModel):
     """Based on user query, create a JSON Schema Form Dialog using react-jsonschema-form to get more information about what the user want to create.
-    The aim is to gather the information needed to create the software requirement document.
+    The aim is to gather the information needed to create the software/tool requirement document or perform data acquisition.
     Whenever possible, try to propose the options for the user to choose from, instead of asking the user to type in the text."""
     form_schema: str = Field(description="json schema for the fields, in yaml format")
     ui_schema: Optional[str] = Field(None, description="customized ui schema for rendering the form, json string, no need to escape quotes, in yaml format")
