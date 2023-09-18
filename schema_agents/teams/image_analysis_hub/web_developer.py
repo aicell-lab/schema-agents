@@ -6,13 +6,6 @@ from schema_agents.tools.code_interpreter import create_mock_client
 
 from .schemas import ReactUI, SoftwareRequirement
 
-CODING_RULES = """
-Important Rules for Coding:
-- Use `window.python` to refer the external python functions
-- Use tailwindcss for styling (the page has `https://cdn.tailwindcss.com` loaded)
-- DO NOT user other libraries besides React and React DOM
-"""
-
 def create_web_developer(client=None):
 
     async def develop_react_ui(req: SoftwareRequirement, role: Role) -> ReactUI:

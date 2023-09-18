@@ -7,7 +7,7 @@ from schema_agents.role import Role
 from schema_agents.schema import Message
 from schema_agents.tools.code_interpreter import create_mock_client
 
-from .schemas import (PythonFunctionScript, PythonFunctionScriptChanges,
+from .schemas import (PythonFunctionScript, PythonFunctionScriptChanges, Change,
                       PythonFunctionScriptWithLineNumber, SoftwareRequirement)
 
 DEPLOY_SCRIPT = """

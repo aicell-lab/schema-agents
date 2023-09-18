@@ -1,6 +1,7 @@
 from typing import List, Optional
 
 from pydantic import BaseModel, Field
+from enum import Enum
 
 # Common description for Python function scripts
 common_desc = {
@@ -36,6 +37,12 @@ class GetExtraInformation(BaseModel):
     content: str = Field(description="The information.")
     summary: str = Field(description="Summary of what you already get.")
 
+CODING_RULES = """
+Important Rules for Coding:
+- Use `window.python` to refer the external python functions
+- Use tailwindcss for styling (the page has `https://cdn.tailwindcss.com` loaded)
+- DO NOT user other libraries besides React and React DOM
+"""
 
 class ReactUI(BaseModel):
     """Defines the ImJoy UI plugin using React."""
