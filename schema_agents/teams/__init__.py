@@ -6,7 +6,6 @@
 @File    : software_team.py
 """
 from pydantic import BaseModel, Field
-
 from schema_agents.config import CONFIG
 from schema_agents.environment import Environment
 from schema_agents.logs import logger

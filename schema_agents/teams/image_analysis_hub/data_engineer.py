@@ -1,18 +1,14 @@
+import asyncio
 import json
 import traceback
-from pydantic import BaseModel, Field
-from typing import List, Optional, Union
-import asyncio
+from typing import List, Union
+
 from schema_agents.role import Role
 from schema_agents.schema import Message
 from schema_agents.tools.code_interpreter import create_mock_client
-from .project_manager import (
-    SoftwareRequirement,
-    SoftwareRequirementAction,
-)
-from pydantic import BaseModel, Field
-from enum import Enum
 
+from .schemas import (PythonFunctionScript, PythonFunctionScriptChanges,
+                      PythonFunctionScriptWithLineNumber, SoftwareRequirement)
 
 DEPLOY_SCRIPT = """
 import asyncio
@@ -38,58 +34,6 @@ for function_name in {function_names}:
 
 await hypha_server.register_service(service_config)
 """
-
-# Common description for Python function scripts
-common_desc = {
-    "script": "Python script that defines functions according to the requirements. Includes imports, function definition, logic, and implementation.",
-    "names": "List of function names.",
-    "pip_packages": "Required Python pip packages. Reuse existing libraries and prioritize common libraries.",
-    "test_script": "Script for testing the Python function. Includes test cases, validation logic, and assertions.",
-    "docstring": "Brief notes for usage, debugging, potential error fixing, and further improvements."
-}
-
-
-class PythonFunctionScript(BaseModel):
-    """Represents a Python function and test script with all its properties."""
-    function_names: List[str] = Field(..., description=common_desc['names'])
-    function_script: str = Field(..., description=common_desc['script'])
-    pip_packages: List[str] = Field(..., description=common_desc['pip_packages'])
-    test_script: str = Field(..., description=common_desc['test_script'])
-    docstring: Optional[str] = Field(None, description=common_desc['docstring'])
-
-class PythonFunctionScriptWithLineNumber(BaseModel):
-    """Python function and test script with line number for display and editing"""
-    function_script_with_line_number: str = Field(..., description=common_desc['script'])
-    pip_packages: List[str] = Field(..., description=common_desc['pip_packages'])
-    test_script_with_line_number: str = Field(..., description=common_desc['test_script'])
-    docstring: Optional[str] = Field(None, description=common_desc['docstring'])
-
-# Enum for operations
-class OperationEnum(str, Enum):
-    ADD = "add"
-    REMOVE = "remove"
-    REPLACE = "replace"
-
-
-# Description for Change operations
-change_desc = {
-    "operation": "The operation type ('add', 'remove', 'replace')",
-    "line": "The line number (of the original script) affected by the change",
-    "content": "The content to be added or replaced"
-}
-
-# BaseModel for changes in Python function scripts
-class Change(BaseModel):
-    operation: OperationEnum = Field(..., description=change_desc['operation'])
-    line: int = Field(..., description=change_desc['line'])
-    content: str = Field(None, description=change_desc['content'])
-
-class PythonFunctionScriptChanges(BaseModel):
-    """Changes to the Python function and test script."""
-    explanation: str = Field(..., description="Brief explanation on why the changes is needed.")
-    function_script_changes: Optional[List[Change]] = Field(None, description="List of changes to the function script.")
-    updated_pip_packages: List[str] = Field(..., description="Updated pip packages.")
-    test_script_changes: Optional[List[Change]] = Field(None, description="List of changes to the test script.")
 
 
 def add_line_number(script):
@@ -304,7 +248,6 @@ async def main():
         content=pr.json(),
         instruct_content=pr,
         role="Project Manager",
-        cause_by=SoftwareRequirementAction,
     )
 
     ds.recv(req)

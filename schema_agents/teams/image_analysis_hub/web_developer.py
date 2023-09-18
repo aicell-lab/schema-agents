@@ -1,61 +1,10 @@
-from pydantic import BaseModel, Field
 import asyncio
+
 from schema_agents.role import Role
 from schema_agents.schema import Message
-from .project_manager import SoftwareRequirement, SoftwareRequirementAction
 from schema_agents.tools.code_interpreter import create_mock_client
 
-
-IMJOY_RPC_PROMPT = """imjoy-rpc enables seamless data exchange between Javascript and Python, supporting various data types, error handling, binary data, advanced structures, and custom types. More details include:
-- Basic Types: String, Number, Boolean, null/undefined, ArrayBuffer.
-- Collections: Array, Object, Set, Map.
-- Error Handling.
-- Binary Handling: Blob, DataView, TypedArray.
-- Advanced Features: tf.Tensor/nj.array, Function, Class.
-- Custom types with registered codecs."""
-
-
-CUSTOM_CODEC_PROMPT="""
-With imjoy-rpc, you can encode and decode custom objects or data types by registering a codec. This can be done through the `api.registerCodec()` function. Here's an example:
-
-```js
-api.registerCodec({
-  "name": "my_custom_codec",
-  "type": MyClass,
-  "encoder": (obj) => {
-    // return the encoded object
-  },
-  "decoder": (obj) => {
-    // return the decoded object
-  }
-});
-
-```python
-api.registerCodec(name="my_custom_codec", type=MyClass, encoder=my_encoder_func, decoder=my_decoder_func)
-```
-The `encoder` function should return an object or dictionary using only primitive types and the `decoder` function should reconstruct the object based on the representation.
-"""
-
-# class FunctionParameter(BaseModel):
-#     """Details of a function's parameter"""
-#     name: str = Field(..., description="Name of the parameter")
-#     type: str = Field(..., description="Data type of the parameter")
-#     optional: bool = Field(default=False, description="Whether the parameter is optional")
-#     default: str = Field(default=None, description="Default value for the parameter, if any")
-
-# class ReactUIApiFunction(BaseModel):
-#     """API Function Specification for Main Function Interaction"""
-#     function_name: str = Field(..., description="Name of the function to be called by the python function")
-#     parameters: List[FunctionParameter] = Field(..., description="List of parameters required by the function")
-#     return_type: str = Field(..., description="Return type of the function")
-#     description: str = Field(default="", description="Description or notes about the function's purpose or behavior when interacting with the UI")
-
-# class ImJoyPluginApiFunction(BaseModel):
-#     """API Function Documentation for ImJoy Plugin"""
-#     function_name: str = Field(..., description="Name of the function within the plugin API")
-#     description: str = Field(..., description="Brief description or notes about the function's purpose or behavior")
-#     parameters: Optional[str] = Field(default=None, description="Short summary of the parameters and their types, if any")
-#     return_type: Optional[str] = Field(default=None, description="Brief description of the return type, if any")
+from .schemas import ReactUI, SoftwareRequirement
 
 CODING_RULES = """
 Important Rules for Coding:
@@ -63,18 +12,6 @@ Important Rules for Coding:
 - Use tailwindcss for styling (the page has `https://cdn.tailwindcss.com` loaded)
 - DO NOT user other libraries besides React and React DOM
 """
-
-class ReactUI(BaseModel):
-    """Defines the ImJoy UI plugin using React."""
-    id: str = Field(..., description="a short id of the application")
-    root_element: str = Field("root", description="The root element ID where the React app will be attached.")
-    react_version: str = Field("17.0.2", description="Version of React to use.")
-    react_dom_version: str = Field("17.0.2", description="Version of ReactDOM to use.")
-    babel_version: str = Field("6.26.0", description="Version of Babel to transpile JSX.")
-    jsx_script: str = Field(..., description="JSX script defining the React app. It will be transpiled with Babel and the dom should be mounted to the root element. DO NOT use import statements." + CODING_RULES) # In the script it must export a set of function as the ImJoy plugin API. e.g.: `api.export({setup, run, show_image: showImage, etc....})
-    # test_script: str = Field(..., description="Test script for calling the exported ImJoy API for testing. Should include test cases, expected outcomes, and validation logic.")
-
-
 
 def create_web_developer(client=None):
 
@@ -200,7 +137,7 @@ async def main(context=None):
     WebDeveloper = create_web_developer(client=create_mock_client())
     wd = WebDeveloper()
     pr = SoftwareRequirement.parse_obj(mock_software_requirements)
-    req = Message(content=pr.json(), instruct_content=pr, role="Project Manager", cause_by=SoftwareRequirementAction)
+    req = Message(content=pr.json(), instruct_content=pr, role="Project Manager")
     wd.recv(req)
     resp = await wd._react()
     print(resp)

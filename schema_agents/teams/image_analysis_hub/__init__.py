@@ -1,42 +1,17 @@
-
-from pydantic import BaseModel, Field
-from typing import Optional
 import asyncio
 from functools import partial
 
-from schema_agents.schema import Message
-from schema_agents.role import Role
-from .project_manager import SoftwareRequirement
-from .data_engineer import create_data_engineer
-from .web_developer import create_web_developer, ReactUI
-from schema_agents.tools.code_interpreter import create_mock_client
-from schema_agents.teams import Team
-
 import yaml
+from schema_agents.role import Role
+from schema_agents.schema import Message
+from schema_agents.teams import Team
+from schema_agents.tools.code_interpreter import create_mock_client
 
-class GenerateUserForm(BaseModel):
-    """Based on user query, create a JSON Schema Form Dialog using react-jsonschema-form to get more information about what the user want to create.
-    The aim is to gather the information needed to create the software requirement document.
-    Whenever possible, try to propose the options for the user to choose from, instead of asking the user to type in the text."""
-    form_schema: str = Field(description="json schema for the fields, in yaml format")
-    ui_schema: Optional[str] = Field(None, description="customized ui schema for rendering the form, json string, no need to escape quotes, in yaml format")
-    submit_label: Optional[str] = Field("Submit", description="Submit button label")
+from .data_engineer import create_data_engineer
+from .schemas import (GenerateUserForm, SoftwareRequirement, UserClarification,
+                      UserRequirements)
+from .web_developer import ReactUI, create_web_developer
 
-class UserRequirements(BaseModel):
-    """User requirements for the software."""
-    goal: str = Field(description="The goal of the user.")
-    ui: str = Field(description="Requirements for the user interface.")
-    data: str = Field(description="Requirements for the data.")
-    validation: str = Field(description="Additional information for testing, e.g. test data and the expected outcome")
-    notes: str = Field(description="Additional notes.")
-class UserClarification(BaseModel):
-    """User submitted form data."""
-    form_data: str = Field(description="Form data in json format")
-
-class GetExtraInformation(BaseModel):
-    """Extra information needed to be able to work on the task."""
-    content: str = Field(description="The information.")
-    summary: str = Field(description="Summary of what you already get.")
 
 async def show_message(client, message: Message):
     """Show message to the user."""
