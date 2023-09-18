@@ -6,18 +6,6 @@ from schema_agents.role import Role
 from schema_agents.schema import Message
 from schema_agents.tools.code_interpreter import create_mock_client
 
-
-class MovePosition(BaseModel):
-    """Position for the microscope to move to."""
-    x: float = Field(default=0.0, description="x position")
-    y: float = Field(default=0.0, description="y position")
-    z: float = Field(default=0.0, description="z position")
-
-class SnapConfig(BaseModel):
-    """Configuration for snapping an image."""
-    path: str = Field(default="", description="save image path")
-    exposure: float = Field(default=0.0, description="exposure time")
-    
 class MultiDimensionalAcquisitionConfig(BaseModel):
     """Configuration for multi-dimensional acquisition."""
     path: str = Field(default="", description="save images path")
@@ -28,11 +16,12 @@ class MultiDimensionalAcquisitionConfig(BaseModel):
 class MultiDimensionalAcquisitionScript(BaseModel):
     """Python script for multi-dimensional acquisition.
     In the script, you can use the following functions to control the microscope:
-    - `microscope_move({'x': 0.0, 'y': 0.0, 'z': 0.0})`
-    - `microscope_snap({'path': './images', 'exposure': 0.0})`
+    - `microscope_move({'x': 0.0, 'y': 0.0, 'z': 0.0})` # x, y, z are in microns
+    - `microscope_snap({'path': './images', 'exposure': 0.0})` # path is the path to save the image, exposure is in seconds
     """
     script: str = Field(default="", description="Script for acquiring multi-dimensional images")
     explanation: str = Field(default="", description="Brief explanation for the script")
+    timeout: float = Field(default=0.0, description="a reasonable timeout for executing the script")
 
 class ExecutionResult(BaseModel):
     """Result of executing a Python script."""
@@ -52,34 +41,19 @@ class Microscope():
     def __init__(self, client):
         self.client = client
         self.initialized = False
-    
-    async def move(self, position: MovePosition=None):
-        """Move the objective to a position."""
-        if not self.initialized:
-            await self.client.execute_code(INIT_SCRIPT)
-            self.initialized = True
-        print("Moving to: "+str(position))
-        self.client.execute_code(f"microscope_move({position.dict()})")
-        
-    async def snap(self, config: SnapConfig=None):
-        """Snap an image from the microscope."""
-        if not self.initialized:
-            await self.client.execute_code(INIT_SCRIPT)
-            self.initialized = True
-        print("save image to: " + config.path)
-    
-    async def plan(self, query: str=None, role: Role=None) -> Union[SnapConfig, MovePosition, MultiDimensionalAcquisitionConfig]:
+
+    async def plan(self, query: str=None, role: Role=None) -> MultiDimensionalAcquisitionConfig:
         """Make a plan for image acquisition tasks."""
         return await role.aask(query, MultiDimensionalAcquisitionConfig)
         
     async def multi_dimensional_acquisition(self, config: MultiDimensionalAcquisitionConfig=None, role: Role=None) -> ExecutionResult:
-        """Execute complex multi-dimensional image acquisition requests by using Python script."""
+        """Perform image acquisition by using Python script."""
         if not self.initialized:
             await self.client.execute_code(INIT_SCRIPT)
             self.initialized = True
         print("Acquiring images in multiple dimensions: " + str(config))
         controlScript = await role.aask(config, MultiDimensionalAcquisitionScript)
-        result = await self.client.execute_code(controlScript.script)
+        result = await self.client.execute_code(controlScript.script, timeout=controlScript.timeout)
         return ExecutionResult(
             status=result['status'],
             outputs=result['outputs'],
@@ -95,12 +69,37 @@ def create_microscopist(client=None):
         profile="Microscopist",
         goal="Acquire images from the microscope based on user's requests.",
         constraints=None,
-        actions=[microscope.plan, microscope.snap, microscope.move, microscope.multi_dimensional_acquisition],
+        actions=[microscope.multi_dimensional_acquisition],
     )
-    return Microscopist()
+    return Microscopist
 
 async def main():
-    ms = create_microscopist()
+    client = create_mock_client()
+    microscope = Microscope(client)
+    Microscopist = Role.create(
+        name="Thomas",
+        profile="Microscopist",
+        goal="Acquire images from the microscope based on user's requests.",
+        constraints=None,
+        actions=[microscope.plan, microscope.multi_dimensional_acquisition],
+    )
+    ms = Microscopist()
+    ms.recv(Message(content="acquire image every 2nm along x, y in a 2x2um square, gradually increase exposure time from 0.1 to 2.0s", role="User"))
+    resp = await ms._react()
+    print(resp)
+    for res in resp:
+        ms.recv(res)
+        resp = await ms._react()
+        print(resp)
+
+    ms.recv(Message(content="acquire an image and save to /tmp/img.png", role="User"))
+    resp = await ms._react()
+    print(resp)
+    for res in resp:
+        ms.recv(res)
+        resp = await ms._react()
+        print(resp)
+
     ms.recv(Message(content="acquire an image every 1 second for 10 seconds", role="User"))
     resp = await ms._react()
     print(resp)

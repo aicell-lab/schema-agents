@@ -322,9 +322,12 @@ class CodeInterpreter:
             logger.error(output)
         return output
 
-def create_mock_client(work_dir_root = "./.data"):
+def create_mock_client(work_dir_root = "./.data", form_data=None):
     os.makedirs(work_dir_root, exist_ok=True)
     ex = CodeInterpreter(work_dir_root=work_dir_root)
+    
+    if not form_data:
+        form_data = {}
     
     class MockDialog():
         def __init__(self, response) -> None:
@@ -335,7 +338,7 @@ def create_mock_client(work_dir_root = "./.data"):
     class MockClient():
         def __init__(self) -> None:
             self.system_prompt =  ex.system_prompt
-        
+
         async def stream_output(self, text):
             print(text)
 
@@ -348,18 +351,12 @@ def create_mock_client(work_dir_root = "./.data"):
         async def set_output(self, output, plugin=None):
             print(output)
 
-        async def execute_code(self, code):
-            return ex.execute_code(code)
+        async def execute_code(self, code, **kwargs):
+            return ex.execute_code(code, **kwargs)
 
         async def show_dialog(self, src, config=None, data=None):
             print(src, config, data)
-            
-            return MockDialog({"formData": {
-                "microscopy_image_type": "widefield",
-                "image_format": "png",
-                "cell_shape": "round",
-                "goal": "segment the image in green channel, the background is black",
-            }})
+            return MockDialog({"formData": form_data})
 
     return MockClient()
     

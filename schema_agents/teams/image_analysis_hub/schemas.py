@@ -22,7 +22,7 @@ class GenerateUserForm(BaseModel):
     submit_label: Optional[str] = Field("Submit", description="Submit button label")
 
 class UserRequirements(BaseModel):
-    """User requirements for the software."""
+    """User requirements for developing a software."""
     goal: str = Field(description="The goal of the user.")
     ui: str = Field(description="Requirements for the user interface.")
     data: str = Field(description="Requirements for the data.")

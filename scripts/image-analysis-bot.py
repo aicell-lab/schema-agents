@@ -9,6 +9,7 @@ from schema_agents.utils import dict_to_md
 from schema_agents.config import CONFIG
 from schema_agents.teams.image_analysis_hub import ImageAnalysisHub
 import logging
+from schema_agents.tools.code_interpreter import create_mock_client
 logging.basicConfig(level=logging.DEBUG)
 
 SERVER_URL = "https://ai.imjoy.io"
@@ -47,9 +48,22 @@ async def chat(query, client, context=None):
     return {'text': accumulated_text, 'plugin': None, 'conversation_id': conversation_id}
 
 async def test_chat():
-    from schema_agents.tools.code_interpreter import create_mock_client
-    client = create_mock_client()
+    client = create_mock_client(form_data={
+        "microscopy_image_type": "widefield",
+        "image_format": "png",
+        "cell_shape": "round",
+        "goal": "segment the image in green channel, the background is black",
+    })
     await chat("create a tool for counting cells in microscopy images", client, {"user": {"id": "github|478667"}})
+
+async def test_microscope():
+    client=create_mock_client(form_data={
+        "microscopy_image_type": "widefield",
+        "path": "./images",
+        "exposure": 0.1,
+    })
+  
+    await chat("acquire an image every 1 second for 3.5 seconds", client, {"user": {"id": "github|478667"}})
 
 async def main():
     client_id = str(uuid.uuid3(uuid.NAMESPACE_DNS, f'urn:node:{hex(uuid.getnode())}'))
@@ -101,5 +115,5 @@ async def main():
 
 if __name__ == "__main__":
     loop = asyncio.get_event_loop()
-    loop.create_task(main())
+    loop.create_task(test_microscope())
     loop.run_forever()

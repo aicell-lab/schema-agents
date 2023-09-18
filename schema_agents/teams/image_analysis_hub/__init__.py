@@ -1,17 +1,17 @@
 import asyncio
 from functools import partial
-
+from typing import Union
 import yaml
 from schema_agents.role import Role
 from schema_agents.schema import Message
 from schema_agents.teams import Team
 from schema_agents.tools.code_interpreter import create_mock_client
 
-from .data_engineer import create_data_engineer
-from .schemas import (GenerateUserForm, SoftwareRequirement, UserClarification,
+from schema_agents.teams.image_analysis_hub.data_engineer import create_data_engineer
+from schema_agents.teams.image_analysis_hub.schemas import (GenerateUserForm, SoftwareRequirement, UserClarification,
                       UserRequirements)
-from .web_developer import ReactUI, create_web_developer
-
+from schema_agents.teams.image_analysis_hub.web_developer import ReactUI, create_web_developer
+from schema_agents.teams.image_analysis_hub.microscopist import create_microscopist, MultiDimensionalAcquisitionConfig
 
 async def show_message(client, message: Message):
     """Show message to the user."""
@@ -31,9 +31,9 @@ async def clarify_user_request(client, user_query: str, role: Role) -> UserClari
     form = await fm.get_data()
     return UserClarification(form_data=str(form['formData']))
 
-async def create_user_requirements(req: UserClarification, role: Role) -> UserRequirements:
-    """Create user requirement."""
-    return await role.aask(req, UserRequirements)
+async def create_user_requirements(req: UserClarification, role: Role) -> Union[MultiDimensionalAcquisitionConfig, UserRequirements]:
+    """Respond to user's requests after clarification."""
+    return await role.aask(req, Union[MultiDimensionalAcquisitionConfig, UserRequirements])
 
 async def create_software_requirements(req: UserRequirements, role: Role) -> SoftwareRequirement:
     """Create software requirement."""
@@ -69,15 +69,6 @@ class ImageAnalysisHub(Team):
                     goal="Deploy the software to the cloud and make it available to the user.",
                     constraints=None,
                     actions=[deploy_app])  
-        self.environment.add_roles([UXManager(), ProjectManager(), DataEngineer(), WebDeveloper(), DevOps()]) 
-
-
-async def test():
-    lab = ImageAnalysisHub()
-    lab.invest(0.5)
-    lab.recruit(client=create_mock_client())
-    lab.start("create a cell counting software")
-    await lab.run(n_round=10)
-
-if __name__ == "__main__":
-    asyncio.run(test())
+        
+        Microscopist = create_microscopist(client=client)
+        self.environment.add_roles([UXManager(), Microscopist(), ProjectManager(), DataEngineer(), WebDeveloper(), DevOps()]) 
