@@ -49,11 +49,11 @@ class Microscope():
     async def multi_dimensional_acquisition(self, config: MicroscopeControlRequirements=None, role: Role=None) -> ExecutionResult:
         """Perform image acquisition by using Python script."""
         if not self.initialized:
-            await self.client.execute_code(INIT_SCRIPT)
+            await self.client.executeScript({"script": INIT_SCRIPT})
             self.initialized = True
         print("Acquiring images in multiple dimensions: " + str(config))
         controlScript = await role.aask(config, MultiDimensionalAcquisitionScript)
-        result = await self.client.execute_code(controlScript.script, timeout=controlScript.timeout)
+        result = await self.client.executeScript({"script": controlScript.script, "timeout": controlScript.timeout})
         return ExecutionResult(
             status=result['status'],
             outputs=result['outputs'],

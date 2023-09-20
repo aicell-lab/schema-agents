@@ -339,24 +339,30 @@ def create_mock_client(work_dir_root = "./.data", form_data=None):
         def __init__(self) -> None:
             self.system_prompt =  ex.system_prompt
 
-        async def stream_output(self, text):
-            print(text)
+        async def newMessage(self, data):
+            print(data)
 
-        async def init(self, conversation_id):
+        async def initialize(self, data):
             pass
         
-        async def show_message(self, message):
+        async def showMessage(self, message):
             print(message)
         
-        async def set_output(self, output, plugin=None):
-            print(output)
+        async def appendText(self, data):
+            print(data)
 
-        async def execute_code(self, code, **kwargs):
-            return ex.execute_code(code, **kwargs)
+        async def executeScript(self, data):
+            script = data['script']
+            del data['script']
+            return ex.execute_code(script, **data)
 
-        async def show_dialog(self, src, config=None, data=None):
+        async def showDialog(self, src, config=None, data=None):
             print(src, config, data)
             return MockDialog({"formData": form_data})
+
+        async def createWindow(self, src, config=None, data=None):
+            print(src, config, data)
+            return MockDialog({})
 
     return MockClient()
     

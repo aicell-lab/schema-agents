@@ -148,14 +148,14 @@ async def test_run_python_function(
     """Test run the python function script."""
     if python_function.pip_packages:
         packages = ",".join([f"'{p}'" for p in python_function.pip_packages])
-        results = await client.execute_code(INSTALL_SCRIPT.format(packages=packages))
+        results = await client.executeScript({"script": INSTALL_SCRIPT.format(packages=packages)})
         output_summary = json.dumps(
             {k: results[k] for k in results.keys() if results[k]}, indent=1
         )
         if results["status"] != "ok":
             raise RuntimeError(f"Failed to install pip packages: {python_function.pip_packages}, error: {output_summary}")
-    results = await client.execute_code(
-        python_function.function_script + "\n" + python_function.test_script
+    results = await client.executeScript(
+        {"script": python_function.function_script + "\n" + python_function.test_script}
     )
     if results["status"] != "ok":
         output_summary = json.dumps(
@@ -165,11 +165,12 @@ async def test_run_python_function(
         return await test_run_python_function(role, client, service_id, python_function)
     else:
         # deploy the functions
-        results = await client.execute_code(
-            DEPLOY_SCRIPT.format(function_names=python_function.function_names,
+        results = await client.executeScript(
+            {"script": DEPLOY_SCRIPT.format(function_names=python_function.function_names,
                                  service_id=service_id,
                                  function_code=python_function.function_script
                                 )
+            }
         )
     return python_function
 
@@ -189,16 +190,13 @@ def create_data_engineer(client=None):
         return func
         # else:
         #     if client:
-        #         await client.show_dialog(
+        #         await client.showDialog(
         #             src="https://gist.githubusercontent.com/oeway/b734c35f69a0ec0dcebe00b078676edb/raw/react-ui-plugin.imjoy.html",
         #             data={"jsx_script": req.jsx_script}
         #         )
         #     else:
         #         print("Unable to show the React UI")
         #     return func
-
-    # if client:
-        # develop_python_functions.__doc__ += client.system_prompt
 
     DataEngineer = Role.create(
         name="Alice",

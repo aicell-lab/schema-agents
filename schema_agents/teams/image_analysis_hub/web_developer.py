@@ -12,7 +12,7 @@ def create_web_developer(client=None):
         """Develop the React UI plugin according to the software requirement, ensuring that it fulfills the desired functionality. """
         plugin = await role.aask(req, ReactUI)
         if client:
-            await client.show_dialog(
+            await client.createWindow(
                 src="https://gist.githubusercontent.com/oeway/b734c35f69a0ec0dcebe00b078676edb/raw/react-ui-plugin.imjoy.html",
                 data={"jsx_script": plugin.jsx_script, "service_id": req.id}
             )
