@@ -30,6 +30,7 @@ class UserRequirements(BaseModel):
     notes: str = Field(description="Additional notes.")
 class UserClarification(BaseModel):
     """User submitted form data."""
+    user_query: str = Field(description="The original user query")
     form_data: str = Field(description="Form data in json format")
 
 class GetExtraInformation(BaseModel):

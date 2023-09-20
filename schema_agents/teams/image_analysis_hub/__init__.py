@@ -31,7 +31,7 @@ async def clarify_user_request(client, user_query: str, role: Role) -> Union[Use
         }
     )
     form = await fm.get_data()
-    return UserClarification(form_data=str(form['formData']))
+    return UserClarification(user_query=user_query, form_data=str(form['formData']))
 
 async def create_user_requirements(req: UserClarification, role: Role) -> Union[MicroscopeControlRequirements, UserRequirements]:
     """Respond to user's requests (can be control microscope or create software) after clarification."""
