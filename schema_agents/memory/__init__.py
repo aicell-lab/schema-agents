@@ -7,4 +7,5 @@
 """
 
 from schema_agents.memory.memory import Memory
+from schema_agents.memory.longterm_memory import LongTermMemory
 

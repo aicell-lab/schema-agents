@@ -5,6 +5,9 @@ from pydantic import BaseModel, Field
 from schema_agents.role import Role
 from schema_agents.schema import Message
 from schema_agents.tools.code_interpreter import create_mock_client
+from schema_agents.memory.longterm_memory import LongTermMemory
+from schema_agents.memory.memory_storage import MemoryStorage
+
 
 class MicroscopeControlRequirements(BaseModel):
     """Requirements for controlling the microscope and acquire images."""
@@ -36,6 +39,37 @@ def microscope_move(position):
 def microscope_snap(config):
     print(f"===> Snapped an image with exposure {config['exposure']} and saved to: { config['path']}")
 """
+
+def test_idea_message():
+    idea = 'Write a cli snake game'
+    role_id = 'UTUser1(Product Manager)'
+    message = Message(role='BOSS', content=INIT_SCRIPT, cause_by=MicroscopeControlRequirements)
+
+    memory_storage: MemoryStorage = MemoryStorage()
+    messages = memory_storage.recover_memory(role_id)
+    memory_storage.add(message)
+    messages = memory_storage.recover_memory(role_id)
+    # assert len(messages) == 0
+
+    memory_storage.add(message)
+    assert memory_storage.is_initialized is True
+
+    sim_idea = 'Write a game of cli snake'
+    sim_message = Message(role='BOSS', content=sim_idea, cause_by=MicroscopeControlRequirements)
+    new_messages = memory_storage.search(sim_message)
+    assert len(new_messages) == 0   # similar, return []
+
+    memory_storage.add(sim_message)
+    search_message = memory_storage.search(sim_message)
+    assert len(search_message) == 1
+    
+    new_idea = 'Write a 2048 web game'
+    new_message = Message(role='BOSS', content=new_idea, cause_by=MicroscopeControlRequirements)
+    new_messages = memory_storage.search(new_message)
+    assert new_messages[0].content == message.content
+
+    memory_storage.clean()
+    assert memory_storage.is_initialized is False
 
 class Microscope():
     def __init__(self, client):
@@ -110,5 +144,6 @@ async def main():
     
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    # asyncio.run(main())
+    test_idea_message()
 
