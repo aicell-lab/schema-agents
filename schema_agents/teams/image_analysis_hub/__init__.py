@@ -3,9 +3,7 @@ from functools import partial
 from typing import Union
 import yaml
 from schema_agents.role import Role
-from schema_agents.schema import Message
 from schema_agents.teams import Team
-from schema_agents.tools.code_interpreter import create_mock_client
 
 from schema_agents.teams.image_analysis_hub.data_engineer import create_data_engineer
 from schema_agents.teams.image_analysis_hub.schemas import (GenerateUserForm, SoftwareRequirement, UserClarification,
@@ -13,16 +11,12 @@ from schema_agents.teams.image_analysis_hub.schemas import (GenerateUserForm, So
 from schema_agents.teams.image_analysis_hub.web_developer import ReactUI, create_web_developer
 from schema_agents.teams.image_analysis_hub.microscopist import create_microscopist, MicroscopeControlRequirements
 
-async def show_message(client, message: Message):
-    """Show message to the user."""
-    await client.set_output(message.content)
-
 async def clarify_user_request(client, user_query: str, role: Role) -> Union[UserClarification, MicroscopeControlRequirements]:
     """Clarify user request by prompting to the user with a form."""
     config = await role.aask(user_query, Union[GenerateUserForm, MicroscopeControlRequirements])
     if isinstance(config, MicroscopeControlRequirements):
         return config
-    fm = await client.show_dialog(
+    fm = await client.showDialog(
         src="https://oeway.github.io/imjoy-json-schema-form/",
         config={
             "schema": config.form_schema and yaml.safe_load(config.form_schema),
