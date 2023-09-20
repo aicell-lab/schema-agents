@@ -16,8 +16,8 @@ SERVER_URL = "https://ai.imjoy.io"
 
 async def chat(msg, client, context=None):
     """Hypha bot chat to help you with various tasks"""
-    if context["user"]['id'] != "github|478667":
-        raise Exception(f"Sorry, you (user: {context['user']}) are not authorized to use this service.")
+    # if context["user"]['id'] != "github|478667":
+    #     raise Exception(f"Sorry, you (user: {context['user']}) are not authorized to use this service.")
     conversation_id = str(uuid.uuid4())
     if client:
         await client.initialize({"conversationId": conversation_id })
