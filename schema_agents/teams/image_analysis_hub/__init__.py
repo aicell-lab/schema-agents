@@ -16,7 +16,7 @@ async def clarify_user_request(client, user_query: str, role: Role) -> Union[Use
     config = await role.aask(user_query, Union[GenerateUserForm, MicroscopeControlRequirements])
     if isinstance(config, MicroscopeControlRequirements):
         return config
-    fm = await client.showDialog(
+    fm = await client.createWindow(
         src="https://oeway.github.io/imjoy-json-schema-form/",
         config={
             "schema": config.form_schema and yaml.safe_load(config.form_schema),

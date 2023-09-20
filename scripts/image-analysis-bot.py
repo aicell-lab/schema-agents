@@ -23,7 +23,7 @@ async def chat(msg, client, context=None):
         await client.initialize({"conversationId": conversation_id })
         await client.showMessage("hypha bot joined the workspace")
         # await client.executeScript({"script": query})
-        # dialog = await client.showDialog(src="https://kaibu.org/#/app")
+        # dialog = await client.createWindow(src="https://kaibu.org/#/app")
         # await dialog.view_image("https://images.proteinatlas.org/61448/1319_C10_2_blue_red_green.jpg")
         await client.newMessage({
             "messageId": str(uuid.uuid4()),
@@ -113,7 +113,8 @@ async def main():
         "chat": chat,
         "ping": lambda context: "pong",
     }, overwrite=True)
-    url = f"https://chat.aicell.io/#/chat/new?service-id={server.config['workspace']}/*:{service_id}"
+    svc = await server.get_service(service_id)
+    url = f"https://chat.aicell.io/#/chat/new?service-id={svc.id}"
     print(f"Hypha bot is ready!\nYou can connect via {url}")
 
 if __name__ == "__main__":
