@@ -32,19 +32,42 @@ class ExecutionResult(BaseModel):
     outputs: List[Dict[str, Any]] = Field(default=[], description="Outputs of executing the script")
     traceback: Optional[str] = Field(default=None, description="Traceback of executing the script")
 
-INIT_SCRIPT = """
-def microscope_move(position):
-    print(f"===> Moving to: {position}")
+class MessageChunk(BaseModel):
+    """Message of functions to be saved in faiss store."""
+    function_name: str = Field(default="", description="Function name")
+    metadata: str = Field(default="", description="original function")
+    func_type: str = Field(default="", description="type of the function language")
+    args: List[str] = Field(default=[], description="arguments of the function")
+    
+# INIT_SCRIPT = """
+# def microscope_move(position):
+#     print(f"===> Moving to: {position}")
 
-def microscope_snap(config):
-    print(f"===> Snapped an image with exposure {config['exposure']} and saved to: { config['path']}")
-"""
+# def microscope_snap(config):
+#     print(f"===> Snapped an image with exposure {config['exposure']} and saved to: { config['path']}")
+# """
 
+def create_memory_storage(role_id='bio'):
+    message_move = MessageChunk(function_name='microscope_move', metadata="""def microscope_move(position):
+        print(f"===> Moving to: {position}")""", func_type='python', args=['position'])
+    message_snap = MessageChunk(function_name='microscope_snap', metadata="""def microscope_snap(config):
+        print(f"===> Snapped an image with exposure {config['exposure']} and saved to: { config['path']}")""", func_type='python', args=['config'])
+
+    memory_store: MemoryStorage = MemoryStorage()
+    role_id = 'bio2'
+    messages = memory_store.recover_memory(role_id)
+    
+    message_pyd = Message(role='bio',content='microscope move python function',instruct_content=message_move)
+    memory_store.add(message_pyd)
+    message_pyd = Message(role='bio',content='microscope snap python function',instruct_content=message_snap)
+    memory_store.add(message_pyd)
+    return memory_store
 
 class Microscope():
     def __init__(self, client):
         self.client = client
         self.initialized = False
+        self.store = None
 
     async def plan(self, query: str=None, role: Role=None) -> MicroscopeControlRequirements:
         """Make a plan for image acquisition tasks."""
@@ -53,7 +76,10 @@ class Microscope():
     async def multi_dimensional_acquisition(self, config: MicroscopeControlRequirements=None, role: Role=None) -> ExecutionResult:
         """Perform image acquisition by using Python script."""
         if not self.initialized:
-            await self.client.executeScript({"script": INIT_SCRIPT})
+            messages = self.store.retrieve_by_query("microscope related functions")
+            for message in messages:
+                script = message.instruct_content.metadata
+                await self.client.executeScript({"script": script})
             self.initialized = True
         print("Acquiring images in multiple dimensions: " + str(config))
         controlScript = await role.aask(config, MultiDimensionalAcquisitionScript)
@@ -64,22 +90,31 @@ class Microscope():
             traceback=result.get("traceback")
         )
 
-def create_microscopist(client=None):
+def create_microscopist_with_ltm(client=None):
     if not client:
         client = create_mock_client()
+
     microscope = Microscope(client)
     Microscopist = Role.create(
         name="Thomas",
         profile="Microscopist",
         goal="Acquire images from the microscope based on user's requests.",
         constraints=None,
-        actions=[microscope.multi_dimensional_acquisition],
+        actions=[microscope.plan, microscope.multi_dimensional_acquisition],
     )
+    
     return Microscopist
+
+
 
 async def main():
     client = create_mock_client()
     microscope = Microscope(client)
+
+    role_id = 'bio'
+    microscope.store = MemoryStorage()
+    microscope.store .recover_memory(role_id)
+
     Microscopist = Role.create(
         name="Thomas",
         profile="Microscopist",
@@ -115,4 +150,5 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+    # create_memory_storage()
 
