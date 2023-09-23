@@ -1,7 +1,3 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-# @Desc   : the implement of memory storage
-
 from typing import List
 from pathlib import Path
 
@@ -23,7 +19,7 @@ class MemoryStorage(FaissStore):
         self.role_id: str = None
         self.role_mem_path: str = None
         self.mem_ttl: int = mem_ttl  # later use
-        self.threshold: float = 0.1  # experience value. TODO The threshold to filter similar memories
+        self.threshold: float = 0.5  # experience value. TODO The threshold to filter similar memories
         self._initialized: bool = False
 
         self.store: FAISS = None  # Faiss engine
@@ -81,6 +77,28 @@ class MemoryStorage(FaissStore):
 
         resp = self.store.similarity_search_with_score(
             query=message.content,
+            k=k
+        )
+        # filter the result which score is smaller than the threshold
+        filtered_resp = []
+        for item, score in resp:
+            # the smaller score means more similar relation
+            if score < self.threshold:
+                continue
+            # convert search result into Memory
+            metadata = item.metadata
+            new_mem = deserialize_message(metadata.get("message_ser"))
+            filtered_resp.append(new_mem)
+        return filtered_resp
+
+    
+    def retrieve_by_query(self, query, k=4) -> List[Message]:
+        """retrieve relate messages from memory storage"""
+        if not self.store:
+            return []
+
+        resp = self.store.similarity_search_with_score(
+            query=query,
             k=k
         )
         # filter the result which score is smaller than the threshold
