@@ -12,6 +12,8 @@ dependencies = [
     "shortuuid>=1.0.1",
     "pydantic<2,>=1.8.2",
     "openai>=0.27.0",
+    "loguru",
+    "docx",
 ]
 
 [tool.setuptools]
