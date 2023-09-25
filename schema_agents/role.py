@@ -20,6 +20,7 @@ from schema_agents.llm import LLM
 from schema_agents.logs import logger
 from schema_agents.memory import Memory
 from schema_agents.schema import Message
+from schema_agents.memory.long_term_memory import LongTermMemory
 from pydantic import BaseModel, Field
 from tenacity import retry, stop_after_attempt, wait_fixed
 
@@ -71,7 +72,7 @@ class RoleContext(BaseModel):
 
 class Role:
     """角色/代理"""
-    def __init__(self, name="", profile="", goal="", constraints=None, desc=""):
+    def __init__(self, name="", profile="", goal="", constraints=None, desc="", long_term_memory: Optional[LongTermMemory]=None):
         self._llm = LLM()
         self._setting = RoleSetting(name=name, profile=profile, goal=goal, constraints=constraints, desc=desc)
         self._states = []
@@ -82,8 +83,8 @@ class Role:
         self._output_schemas = []
         self._action_index = {}
         self._user_support_actions = []
+        self.long_term_memory = long_term_memory
         
-
     def _reset(self):
         self._states = []
         self._actions = []
@@ -184,13 +185,13 @@ class Role:
         return rsp
 
     @staticmethod
-    def create(name, profile, goal, constraints=None, actions=None):
+    def create(name, profile, goal, constraints=None, actions=None, desc='', long_term_memory: Optional[LongTermMemory]=None):
         # Convert the profile into a valid class name
         class_name = re.sub(r'\W+', '', profile.replace(' ', ''))
 
         # Define the __init__ method for the new class
-        def __init__(self, name=name, profile=profile, goal=goal, constraints=constraints):
-            super(self.__class__, self).__init__(name, profile, goal, constraints)
+        def __init__(self, name=name, profile=profile, goal=goal, constraints=constraints, desc=desc):
+            super(self.__class__, self).__init__(name=name, profile=profile, goal=goal, constraints=constraints, desc=desc, long_term_memory=long_term_memory)
             self._init_actions(actions or [])
 
         # Create the new class with 'type'
