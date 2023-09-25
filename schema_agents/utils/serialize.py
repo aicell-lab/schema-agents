@@ -8,7 +8,7 @@ import pickle
 from collections import defaultdict
 from pydantic import create_model
 
-from schema_agents.schema import Message
+from schema_agents.schema import Message, MemoryChunk
 from schema_agents.action import Action
 from schema_agents.action import ActionOutput
 
@@ -73,3 +73,33 @@ def deserialize_message(message_ser: str) -> Message:
         message.instruct_content = ic_new
 
     return message
+
+
+def serialize_memory(memory: MemoryChunk):
+    memory_cp = copy.deepcopy(memory)  # avoid `instruct_content` value update by reference
+    ic = memory_cp.content
+    if ic:
+        # model create by pydantic create_model like `pydantic.main.prd`, can't pickle.dump directly
+        schema = ic.schema()
+        mapping = actionoutout_schema_to_mapping(schema)
+
+        memory_cp.content = {
+            'class': schema['title'],
+            'mapping': mapping,
+            'value': ic.dict()
+        }
+    mmr_ser = pickle.dumps(memory_cp)
+
+    return mmr_ser
+
+
+def deserialize_memory(mmr_ser: str) -> MemoryChunk:
+    memory = pickle.loads(mmr_ser)
+    if memory.content:
+        ic = memory.content
+        ic_obj = ActionOutput.create_model_class(class_name=ic['class'],
+                                                 mapping=ic['mapping'])
+        ic_new = ic_obj(**ic['value'])
+        memory.content = ic_new
+
+    return memory

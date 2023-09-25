@@ -3,10 +3,9 @@ from typing import Any, Dict, List, Optional, Union
 
 from pydantic import BaseModel, Field
 from schema_agents.role import Role
-from schema_agents.schema import Message
+from schema_agents.schema import Message, MemoryChunk
+from schema_agents.memory.long_term_memory import LongTermMemory
 from schema_agents.tools.code_interpreter import create_mock_client
-from schema_agents.memory.longterm_memory import LongTermMemory
-from schema_agents.memory.memory_storage import MemoryStorage
 
 
 class MicroscopeControlRequirements(BaseModel):
@@ -15,6 +14,7 @@ class MicroscopeControlRequirements(BaseModel):
     timeout: float = Field(default=0.0, description="timeout")
     query: str = Field(default="", description="user's original request")
     plan: str = Field(default="", description="plan for control microscope and acquiring images")
+    experiences: List[MemoryChunk] = Field(default=[], description="experiences of making errors")
 
 class MultiDimensionalAcquisitionScript(BaseModel):
     """Python script for simple and complex multi-dimensional acquisition.
@@ -32,42 +32,47 @@ class ExecutionResult(BaseModel):
     outputs: List[Dict[str, Any]] = Field(default=[], description="Outputs of executing the script")
     traceback: Optional[str] = Field(default=None, description="Traceback of executing the script")
 
-class MessageChunk(BaseModel):
-    """Message of functions to be saved in faiss store."""
+class FunctionMemory(BaseModel):
+    """Functions to be saved in the long term memory."""
     function_name: str = Field(default="", description="Function name")
-    metadata: str = Field(default="", description="original function")
-    func_type: str = Field(default="", description="type of the function language")
+    code: str = Field(default="", description="original code of the function")
+    lang: str = Field(default="", description="function language")
     args: List[str] = Field(default=[], description="arguments of the function")
     
-# INIT_SCRIPT = """
-# def microscope_move(position):
-#     print(f"===> Moving to: {position}")
+class ErrorMemory(BaseModel):
+    """Experience of making errors to be saved in the long term memory."""    
+    error: str = Field(default="", description="Error made by the user")
+    cause: str = Field(default="", description="Cause of the error")
+    solution: str = Field(default="", description="Solution of the error")
 
-# def microscope_snap(config):
-#     print(f"===> Snapped an image with exposure {config['exposure']} and saved to: { config['path']}")
-# """
 
-def create_memory_storage(role_id='bio'):
-    message_move = MessageChunk(function_name='microscope_move', metadata="""def microscope_move(position):
-        print(f"===> Moving to: {position}")""", func_type='python', args=['position'])
-    message_snap = MessageChunk(function_name='microscope_snap', metadata="""def microscope_snap(config):
-        print(f"===> Snapped an image with exposure {config['exposure']} and saved to: { config['path']}")""", func_type='python', args=['config'])
-
-    memory_store: MemoryStorage = MemoryStorage()
-    role_id = 'bio2'
-    messages = memory_store.recover_memory(role_id)
+def create_long_term_memory():
+    memory = LongTermMemory()
+    role_id = 'bio'
+    memory.recover_memory(role_id)
+    memory.clean()
     
-    message_pyd = Message(role='bio',content='microscope move python function',instruct_content=message_move)
-    memory_store.add(message_pyd)
-    message_pyd = Message(role='bio',content='microscope snap python function',instruct_content=message_snap)
-    memory_store.add(message_pyd)
-    return memory_store
+    function_move = FunctionMemory(function_name='microscope_move', code="""def microscope_move(position):
+        print(f"===> Moving to: {position}")""", lang='python', args=['position'])
+    function_snap = FunctionMemory(function_name='microscope_snap', code="""def microscope_snap(config):
+        print(f"===> Snapped an image with exposure {config['exposure']} and saved to: { config['path']}")""", lang='python', args=['config'])
+
+    error_mem = ErrorMemory(error='Resolution of microscope movement is 5nm', solution='Make sure each movement is larger than 5nm')
+
+    error_mem = MemoryChunk(index='Error made for microscope_move function', content=error_mem, category='error')
+    memory.add(error_mem)
+    new_memory = MemoryChunk(index='microscope move python function',content=function_move, category='function')
+    memory.add(new_memory)
+    new_memory = MemoryChunk(index='microscope snap python function',content=function_snap, category='function')
+    memory.add(new_memory)
+    memories = memory.recover_memory(role_id)
+    return memory
+
 
 class Microscope():
     def __init__(self, client):
         self.client = client
         self.initialized = False
-        self.store = None
 
     async def plan(self, query: str=None, role: Role=None) -> MicroscopeControlRequirements:
         """Make a plan for image acquisition tasks."""
@@ -76,14 +81,22 @@ class Microscope():
     async def multi_dimensional_acquisition(self, config: MicroscopeControlRequirements=None, role: Role=None) -> ExecutionResult:
         """Perform image acquisition by using Python script."""
         if not self.initialized:
-            messages = self.store.retrieve_by_query("microscope related functions")
+            messages = role.long_term_memory.retrieve("microscope related functions", filter={"category": "function"})
             for message in messages:
-                script = message.instruct_content.metadata
+                script = message.content.code
                 await self.client.executeScript({"script": script})
             self.initialized = True
+
+        experiences = role.long_term_memory.retrieve("microscope related function", filter={"category": "error"})
+        config.experiences = experiences
         print("Acquiring images in multiple dimensions: " + str(config))
         controlScript = await role.aask(config, MultiDimensionalAcquisitionScript)
         result = await self.client.executeScript({"script": controlScript.script, "timeout": controlScript.timeout})
+        if result['status'] != 'ok':
+            new_experience = await role.aask('summarize the error experience', ErrorMemory)
+            error_memo = MemoryChunk(index='Error made for microscope_move function', content=new_experience, category='error')
+            role.long_term_memory.add(error_memo)
+            
         return ExecutionResult(
             status=result['status'],
             outputs=result['outputs'],
@@ -106,14 +119,9 @@ def create_microscopist_with_ltm(client=None):
     return Microscopist
 
 
-
 async def main():
     client = create_mock_client()
     microscope = Microscope(client)
-
-    role_id = 'bio'
-    microscope.store = MemoryStorage()
-    microscope.store .recover_memory(role_id)
 
     Microscopist = Role.create(
         name="Thomas",
@@ -121,8 +129,10 @@ async def main():
         goal="Acquire images from the microscope based on user's requests.",
         constraints=None,
         actions=[microscope.plan, microscope.multi_dimensional_acquisition],
+        long_term_memory=create_long_term_memory(),
     )
     ms = Microscopist()
+
     ms.recv(Message(content="acquire image every 2nm along x, y in a 2x2um square, gradually increase exposure time from 0.1 to 2.0s", role="User"))
     resp = await ms._react()
     print(resp)
@@ -130,6 +140,17 @@ async def main():
         ms.recv(res)
         resp = await ms._react()
         print(resp)
+
+
+    ms.recv(Message(content="acquire image every 2nm along x, y in a 2x2um square, gradually increase exposure time from 0.1 to 2.0s", role="User"))
+    resp = await ms._react()
+    print(resp)
+    for res in resp:
+        ms.recv(res)
+        resp = await ms._react()
+        print(resp)
+
+    
 
     ms.recv(Message(content="acquire an image and save to /tmp/img.png", role="User"))
     resp = await ms._react()
@@ -147,6 +168,8 @@ async def main():
         resp = await ms._react()
         print(resp)
     
+    ms.long_term_memory.clean()
+    assert ms.long_term_memory.is_initialized is False
 
 if __name__ == "__main__":
     asyncio.run(main())
