@@ -5,14 +5,14 @@ from langchain.vectorstores.faiss import FAISS
 
 from schema_agents.const import DATA_PATH, MEM_TTL
 from schema_agents.logs import logger
-from schema_agents.schema import Message
-from schema_agents.utils.serialize import serialize_message, deserialize_message
+from schema_agents.schema import MemoryChunk
+from schema_agents.utils.serialize import serialize_memory, deserialize_memory
 from metagpt.document_store.faiss_store import FaissStore
 
 
-class MemoryStorage(FaissStore):
+class LongTermMemory(FaissStore):
     """
-    The memory storage with Faiss as ANN search engine
+    The long term memory storage with Faiss as ANN search engine
     """
 
     def __init__(self, mem_ttl: int = MEM_TTL):
@@ -28,22 +28,22 @@ class MemoryStorage(FaissStore):
     def is_initialized(self) -> bool:
         return self._initialized
 
-    def recover_memory(self, role_id: str) -> List[Message]:
+    def recover_memory(self, role_id: str) -> List[MemoryChunk]:
         self.role_id = role_id
         self.role_mem_path = Path(DATA_PATH / f'role_mem/{self.role_id}/')
         self.role_mem_path.mkdir(parents=True, exist_ok=True)
 
         self.store = self._load()
-        messages = []
+        memories = []
         if not self.store:
             # TODO init `self.store` under here with raw faiss api instead under `add`
             pass
         else:
             for _id, document in self.store.docstore._dict.items():
-                messages.append(deserialize_message(document.metadata.get("message_ser")))
+                memories.append(deserialize_memory(document.metadata.get("memory_ser")))
             self._initialized = True
 
-        return messages
+        return memories
 
     def _get_index_and_store_fname(self):
         if not self.role_mem_path:
@@ -54,13 +54,13 @@ class MemoryStorage(FaissStore):
         return index_fpath, storage_fpath
 
     def persist(self):
-        super(MemoryStorage, self).persist()
+        super(LongTermMemory, self).persist()
         logger.debug(f'Agent {self.role_id} persist memory into local')
 
-    def add(self, message: Message) -> bool:
-        """ add message into memory storage"""
-        docs = [message.content]
-        metadatas = [{"message_ser": serialize_message(message)}]
+    def add(self, memory: MemoryChunk) -> bool:
+        """ add memory into memory storage"""
+        docs = [memory.index]
+        metadatas = [{"memory_ser": serialize_memory(memory), "category": memory.category}]
         if not self.store:
             # init Faiss
             self.store = self._write(docs, metadatas)
@@ -68,15 +68,15 @@ class MemoryStorage(FaissStore):
         else:
             self.store.add_texts(texts=docs, metadatas=metadatas)
         self.persist()
-        logger.info(f"Agent {self.role_id}'s memory_storage add a message")
+        logger.info(f"Agent {self.role_id}'s memory_storage add a piece of memory")
 
-    def search(self, message: Message, k=4) -> List[Message]:
+    def search(self, memory: MemoryChunk, k=4) -> List[MemoryChunk]:
         """search for dissimilar messages"""
         if not self.store:
             return []
 
         resp = self.store.similarity_search_with_score(
-            query=message.content,
+            query=memory.index,
             k=k
         )
         # filter the result which score is smaller than the threshold
@@ -87,19 +87,20 @@ class MemoryStorage(FaissStore):
                 continue
             # convert search result into Memory
             metadata = item.metadata
-            new_mem = deserialize_message(metadata.get("message_ser"))
+            new_mem = deserialize_memory(metadata.get("memory_ser"))
             filtered_resp.append(new_mem)
         return filtered_resp
 
     
-    def retrieve_by_query(self, query, k=4) -> List[Message]:
-        """retrieve relate messages from memory storage"""
+    def retrieve(self, query, k=4, filter=None) -> List[MemoryChunk]:
+        """retrieve relate memories from memory storage"""
         if not self.store:
             return []
 
         resp = self.store.similarity_search_with_score(
             query=query,
-            k=k
+            k=k,
+            filter=filter,
         )
         # filter the result which score is smaller than the threshold
         filtered_resp = []
@@ -107,9 +108,11 @@ class MemoryStorage(FaissStore):
             # the smaller score means more similar relation
             if score > self.threshold:
                 continue
+            # filter the result which category is equal to the category
+
             # convert search result into Memory
             metadata = item.metadata
-            new_mem = deserialize_message(metadata.get("message_ser"))
+            new_mem = deserialize_memory(metadata.get("memory_ser"))
             filtered_resp.append(new_mem)
         return filtered_resp
 
