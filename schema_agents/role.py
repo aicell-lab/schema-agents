@@ -358,10 +358,27 @@ class Role:
         if isinstance(req, str):
             messages = [{"role": "user", "content": req}]
             input_schema = None
-        else:
-            assert isinstance(req, BaseModel)
+        elif isinstance(req, dict):
+            messages = [req]
+            input_schema = None
+        elif isinstance(req, BaseModel):
             input_schema = req.__class__
             messages = [{"role": "function", "name": input_schema.__name__, "content": req.json()}]
+        else:
+            assert isinstance(req, list)
+            messages = []
+            for r in req:
+                if isinstance(r, str):
+                    messages.append({"role": "user", "content": r})
+                    input_schema = None
+                elif isinstance(r, dict):
+                    messages.append(r)
+                    input_schema = None
+                elif isinstance(r, BaseModel):
+                    input_schema = r.__class__
+                    messages.append({"role": "function", "name": input_schema.__name__, "content": r.json()})
+                else:
+                    raise ValueError(f"Invalid request {r}")
         
         assert output_schema is str or isinstance(output_schema, typing._UnionGenericAlias) or issubclass(output_schema, BaseModel)
         
