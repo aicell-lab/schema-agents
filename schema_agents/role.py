@@ -16,6 +16,7 @@ from typing import Dict, Iterable, List, Optional, Type, Union
 from schema_agents.action import (Action, ActionOutput, parse_special_json,
                               schema_to_function)
 # from schema_agents.environment import Environment
+from schema_agents.memory import Memory
 from schema_agents.llm import LLM
 from schema_agents.logs import logger
 from schema_agents.schema import Message
@@ -45,7 +46,7 @@ class RoleSetting(BaseModel):
 class RoleContext(BaseModel):
     """角色运行时上下文"""
     env: 'Environment' = Field(default=None)
-    memory: 'Memory' = Field(default_factory=None)
+    memory: Memory = Field(default_factory=Memory)
     state: int = Field(default=0)
     todo: Action = Field(default=None)
     watch: set[Type[Action]] = Field(default_factory=set)
@@ -153,7 +154,7 @@ class Role:
             return
         self._rc.memory.add(message)
 
-    async def handle(self, message: Message) -> Message:
+    async def handle(self, message: Message) -> list[Message]:
         """接收信息，并用行动回复"""
         # logger.debug(f"{self.name=}, {self.profile=}, {message.role=}")
         self.recv(message)
@@ -272,7 +273,7 @@ class Role:
         
 
     # @retry(stop=stop_after_attempt(2), wait=wait_fixed(1))
-    async def _react(self) -> None:
+    async def _react(self) -> list[Message]:
         context = self._rc.important_memory
         # Only process messages that are not processed by this role
         context = [msg for msg in context if self not in msg.processed_by]
