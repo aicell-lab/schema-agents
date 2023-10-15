@@ -18,7 +18,6 @@ from schema_agents.action import (Action, ActionOutput, parse_special_json,
 # from schema_agents.environment import Environment
 from schema_agents.llm import LLM
 from schema_agents.logs import logger
-from schema_agents.memory import Memory
 from schema_agents.schema import Message
 from schema_agents.memory.long_term_memory import LongTermMemory
 from pydantic import BaseModel, Field
@@ -46,7 +45,7 @@ class RoleSetting(BaseModel):
 class RoleContext(BaseModel):
     """角色运行时上下文"""
     env: 'Environment' = Field(default=None)
-    memory: Memory = Field(default_factory=Memory)
+    memory: 'Memory' = Field(default_factory=None)
     state: int = Field(default=0)
     todo: Action = Field(default=None)
     watch: set[Type[Action]] = Field(default_factory=set)

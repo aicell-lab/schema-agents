@@ -14,6 +14,14 @@ dependencies = [
     "openai>=0.27.0",
     "loguru",
     "docx",
+    "jupyter-client",
+    "faiss-cpu",
+    "pyyaml",
+    "python-docx",
+    "tiktoken",
+    "anthropic",
+    "tenacity",
+    "langchain",
 ]
 
 [tool.setuptools]
