@@ -5,8 +5,7 @@ from pydantic import BaseModel, Field
 from schema_agents.role import Role
 from schema_agents.schema import Message
 from schema_agents.tools.code_interpreter import create_mock_client
-from schema_agents.memory.longterm_memory import LongTermMemory
-from schema_agents.memory.memory_storage import MemoryStorage
+from schema_agents.memory.long_term_memory import LongTermMemory
 
 
 class MicroscopeControlRequirements(BaseModel):

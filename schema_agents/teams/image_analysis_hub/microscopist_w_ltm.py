@@ -6,7 +6,7 @@ from schema_agents.role import Role
 from schema_agents.schema import Message, MemoryChunk
 from schema_agents.memory.long_term_memory import LongTermMemory
 from schema_agents.tools.code_interpreter import create_mock_client
-
+from .schemas import (FunctionMemory, ErrorMemory)
 
 class MicroscopeControlRequirements(BaseModel):
     """Requirements for controlling the microscope and acquire images."""
@@ -32,18 +32,6 @@ class ExecutionResult(BaseModel):
     outputs: List[Dict[str, Any]] = Field(default=[], description="Outputs of executing the script")
     traceback: Optional[str] = Field(default=None, description="Traceback of executing the script")
 
-class FunctionMemory(BaseModel):
-    """Functions to be saved in the long term memory."""
-    function_name: str = Field(default="", description="Function name")
-    code: str = Field(default="", description="original code of the function")
-    lang: str = Field(default="", description="function language")
-    args: List[str] = Field(default=[], description="arguments of the function")
-    
-class ErrorMemory(BaseModel):
-    """Experience of making errors to be saved in the long term memory."""    
-    error: str = Field(default="", description="Error made by the user")
-    cause: str = Field(default="", description="Cause of the error")
-    solution: str = Field(default="", description="Solution of the error")
 
 
 def create_long_term_memory():
@@ -57,10 +45,10 @@ def create_long_term_memory():
     function_snap = FunctionMemory(function_name='microscope_snap', code="""def microscope_snap(config):
         print(f"===> Snapped an image with exposure {config['exposure']} and saved to: { config['path']}")""", lang='python', args=['config'])
 
-    error_mem = ErrorMemory(error='Resolution of microscope movement is 5nm', solution='Make sure each movement is larger than 5nm')
+    error = ErrorMemory(error='Microscope move can not be obtained for less than 5nm', solution='Make sure each movement is larger than 5nm')
 
-    error_mem = MemoryChunk(index='Error made for microscope_move function', content=error_mem, category='error')
-    memory.add(error_mem)
+    error_memo = MemoryChunk(index='Error made for microscope_move function', content=error, category='error')
+    memory.add(error_memo)
     new_memory = MemoryChunk(index='microscope move python function',content=function_move, category='function')
     memory.add(new_memory)
     new_memory = MemoryChunk(index='microscope snap python function',content=function_snap, category='function')
@@ -81,9 +69,9 @@ class Microscope():
     async def multi_dimensional_acquisition(self, config: MicroscopeControlRequirements=None, role: Role=None) -> ExecutionResult:
         """Perform image acquisition by using Python script."""
         if not self.initialized:
-            messages = role.long_term_memory.retrieve("microscope related functions", filter={"category": "function"})
-            for message in messages:
-                script = message.content.code
+            memories = role.long_term_memory.retrieve("microscope related functions", filter={"category": "function"})
+            for memory in memories:
+                script = memory.content.code
                 await self.client.executeScript({"script": script})
             self.initialized = True
 
@@ -140,16 +128,6 @@ async def main():
         ms.recv(res)
         resp = await ms._react()
         print(resp)
-
-
-    ms.recv(Message(content="acquire image every 2nm along x, y in a 2x2um square, gradually increase exposure time from 0.1 to 2.0s", role="User"))
-    resp = await ms._react()
-    print(resp)
-    for res in resp:
-        ms.recv(res)
-        resp = await ms._react()
-        print(resp)
-
     
 
     ms.recv(Message(content="acquire an image and save to /tmp/img.png", role="User"))

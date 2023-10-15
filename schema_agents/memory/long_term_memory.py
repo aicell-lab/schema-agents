@@ -1,13 +1,12 @@
 from typing import List
 from pathlib import Path
 
-from langchain.vectorstores.faiss import FAISS
 
 from schema_agents.const import DATA_PATH, MEM_TTL
 from schema_agents.logs import logger
 from schema_agents.schema import MemoryChunk
 from schema_agents.utils.serialize import serialize_memory, deserialize_memory
-from metagpt.document_store.faiss_store import FaissStore
+from schema_agents.memory.faiss_store import FaissStore
 
 
 class LongTermMemory(FaissStore):
@@ -22,7 +21,7 @@ class LongTermMemory(FaissStore):
         self.threshold: float = 0.5  # experience value. TODO The threshold to filter similar memories
         self._initialized: bool = False
 
-        self.store: FAISS = None  # Faiss engine
+        self.store: 'FAISS' = None  # Faiss engine
 
     @property
     def is_initialized(self) -> bool:
@@ -60,6 +59,8 @@ class LongTermMemory(FaissStore):
     def add(self, memory: MemoryChunk) -> bool:
         """ add memory into memory storage"""
         docs = [memory.index]
+        # make sure memory.category is compatible with the BaseModel of memory.content
+        # TODO
         metadatas = [{"memory_ser": serialize_memory(memory), "category": memory.category}]
         if not self.store:
             # init Faiss
