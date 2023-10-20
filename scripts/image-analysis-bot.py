@@ -4,6 +4,7 @@ import os
 import uuid
 import asyncio
 from functools import partial
+from pydantic import BaseModel
 from imjoy_rpc.hypha import connect_to_server, login
 from schema_agents.utils import dict_to_md
 from schema_agents.config import CONFIG
@@ -63,8 +64,11 @@ async def test_microscope():
         "path": "./images",
         "exposure": 0.1,
     })
-  
-    await chat("acquire an image every 1 second for 3.5 seconds", client, {"user": {"id": "github|478667"}})
+    class Message(BaseModel):
+        messageId: str
+        text: str
+    
+    await chat(Message(text="acquire an image every 1 second for 3.5 seconds", messageId="123"), client, {"user": {"id": "github|478667"}})
 
 async def main():
     client_id = str(uuid.uuid3(uuid.NAMESPACE_DNS, f'urn:node:{hex(uuid.getnode())}'))
@@ -119,5 +123,5 @@ async def main():
 
 if __name__ == "__main__":
     loop = asyncio.get_event_loop()
-    loop.create_task(main())
+    loop.create_task(test_microscope())
     loop.run_forever()
