@@ -6,11 +6,9 @@
 @File    : llm.py
 """
 
-from schema_agents.provider.anthropic_api import Claude2 as Claude
 from schema_agents.provider.openai_api import OpenAIGPTAPI as LLM
 
 DEFAULT_LLM = LLM()
-CLAUDE_LLM = Claude()
 
 
 async def ai_func(prompt):
