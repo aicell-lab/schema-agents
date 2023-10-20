@@ -1,6 +1,5 @@
 import pytest
 import os
-import time
 from schema_agents.tools.code_interpreter import CodeInterpreter, extract_stdout, extract_stderr
 
 class TestCodeInterpreter:

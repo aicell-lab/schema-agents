@@ -2,14 +2,25 @@
 
 A schema-based LLM framework for building multi-agent collaborative systems.
 
-## Installation
+## Development
+
+Clone the repository:
 
 ```
-git clone https://github.com/oeway/MetaGPT.git
-cd MetaGPT
-git checkout schema-agents
-pip install -r requirements.txt
-pip install -e .
-cd ../
+git clone https://github.com/aicell-lab/schema-agents.git
+cd schema-agents
+```
+
+Create a conda environment and install dependencies:
+
+
+```
+conda create -n schema-agents python=3.10
+conda activate schema-agents
+```
+
+```
+conda install faiss-cpu -c conda-forge
+pip install -r requirements_test.txt
 pip install -e .
 ```
