@@ -64,6 +64,26 @@ class AIMessage(Message):
         super().__init__(content, 'assistant')
 
 
+@dataclass
+class MemoryChunk:
+    """list[<role>: <content>]"""
+    index: str
+    content: BaseModel = field(default=None)
+    category: str = field(default=None)
+
+    def __str__(self):
+        # prefix = '-'.join([self.role, str(self.cause_by)])
+        return f"memory chunk: {self.index}"
+
+    def __repr__(self):
+        return self.__str__()
+
+    def to_dict(self) -> dict:
+        return {
+            "index": self.index
+        }
+
+
 if __name__ == '__main__':
     test_content = 'test_message'
     msgs = [

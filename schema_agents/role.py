@@ -16,10 +16,11 @@ from typing import Dict, Iterable, List, Optional, Type, Union
 from schema_agents.action import (Action, ActionOutput, parse_special_json,
                               schema_to_function)
 # from schema_agents.environment import Environment
+from schema_agents.memory import Memory
 from schema_agents.llm import LLM
 from schema_agents.logs import logger
-from schema_agents.memory import Memory
 from schema_agents.schema import Message
+from schema_agents.memory.long_term_memory import LongTermMemory
 from pydantic import BaseModel, Field
 from tenacity import retry, stop_after_attempt, wait_fixed
 
@@ -71,7 +72,7 @@ class RoleContext(BaseModel):
 
 class Role:
     """角色/代理"""
-    def __init__(self, name="", profile="", goal="", constraints=None, desc=""):
+    def __init__(self, name="", profile="", goal="", constraints=None, desc="", long_term_memory: Optional[LongTermMemory]=None):
         self._llm = LLM()
         self._setting = RoleSetting(name=name, profile=profile, goal=goal, constraints=constraints, desc=desc)
         self._states = []
@@ -82,8 +83,8 @@ class Role:
         self._output_schemas = []
         self._action_index = {}
         self._user_support_actions = []
+        self.long_term_memory = long_term_memory
         
-
     def _reset(self):
         self._states = []
         self._actions = []
@@ -153,7 +154,7 @@ class Role:
             return
         self._rc.memory.add(message)
 
-    async def handle(self, message: Message) -> Message:
+    async def handle(self, message: Message) -> list[Message]:
         """接收信息，并用行动回复"""
         # logger.debug(f"{self.name=}, {self.profile=}, {message.role=}")
         self.recv(message)
@@ -184,13 +185,13 @@ class Role:
         return rsp
 
     @staticmethod
-    def create(name, profile, goal, constraints=None, actions=None):
+    def create(name, profile, goal, constraints=None, actions=None, desc='', long_term_memory: Optional[LongTermMemory]=None):
         # Convert the profile into a valid class name
         class_name = re.sub(r'\W+', '', profile.replace(' ', ''))
 
         # Define the __init__ method for the new class
-        def __init__(self, name=name, profile=profile, goal=goal, constraints=constraints):
-            super(self.__class__, self).__init__(name, profile, goal, constraints)
+        def __init__(self, name=name, profile=profile, goal=goal, constraints=constraints, desc=desc):
+            super(self.__class__, self).__init__(name=name, profile=profile, goal=goal, constraints=constraints, desc=desc, long_term_memory=long_term_memory)
             self._init_actions(actions or [])
 
         # Create the new class with 'type'
@@ -272,7 +273,7 @@ class Role:
         
 
     # @retry(stop=stop_after_attempt(2), wait=wait_fixed(1))
-    async def _react(self) -> None:
+    async def _react(self) -> list[Message]:
         context = self._rc.important_memory
         # Only process messages that are not processed by this role
         context = [msg for msg in context if self not in msg.processed_by]
@@ -357,10 +358,27 @@ class Role:
         if isinstance(req, str):
             messages = [{"role": "user", "content": req}]
             input_schema = None
-        else:
-            assert isinstance(req, BaseModel)
+        elif isinstance(req, dict):
+            messages = [req]
+            input_schema = None
+        elif isinstance(req, BaseModel):
             input_schema = req.__class__
             messages = [{"role": "function", "name": input_schema.__name__, "content": req.json()}]
+        else:
+            assert isinstance(req, list)
+            messages = []
+            for r in req:
+                if isinstance(r, str):
+                    messages.append({"role": "user", "content": r})
+                    input_schema = None
+                elif isinstance(r, dict):
+                    messages.append(r)
+                    input_schema = None
+                elif isinstance(r, BaseModel):
+                    input_schema = r.__class__
+                    messages.append({"role": "function", "name": input_schema.__name__, "content": r.json()})
+                else:
+                    raise ValueError(f"Invalid request {r}")
         
         assert output_schema is str or isinstance(output_schema, typing._UnionGenericAlias) or issubclass(output_schema, BaseModel)
         

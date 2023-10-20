@@ -28,6 +28,7 @@ class UserRequirements(BaseModel):
     data: str = Field(description="Requirements for the data.")
     validation: str = Field(description="Additional information for testing, e.g. test data and the expected outcome")
     notes: str = Field(description="Additional notes.")
+
 class UserClarification(BaseModel):
     """User submitted form data."""
     user_query: str = Field(description="The original user query")
@@ -37,6 +38,25 @@ class GetExtraInformation(BaseModel):
     """Extra information needed to be able to work on the task."""
     content: str = Field(description="The information.")
     summary: str = Field(description="Summary of what you already get.")
+
+
+class FunctionMemory(BaseModel):
+    """Functions to be saved in the long term memory."""
+    function_name: str = Field(default="", description="Function name")
+    code: str = Field(default="", description="original code of the function")
+    lang: str = Field(default="", description="function language")
+    args: List[str] = Field(default=[], description="arguments of the function")
+    
+class ErrorMemory(BaseModel):
+    """Experience of making errors to be saved in the long term memory."""    
+    error: str = Field(default="", description="Error description")
+    cause_by: str = Field(default="", description="Cause of the error")
+    solution: str = Field(default="", description="Solution to fix the error")
+
+class ExperienceMemory(BaseModel):
+    """Experience to be saved in the long term memory."""    
+    summary: str = Field(default="", description="Summary of the experience. This will be used as index in the long term memory for retrival.")
+    keypoints: Optional[str] = Field(default="", description="Key points to remember for this experience.")
 
 CODING_RULES = """
 Important Rules for Coding:
@@ -62,6 +82,7 @@ class PythonFunctionScript(BaseModel):
     pip_packages: List[str] = Field(..., description=common_desc['pip_packages'])
     test_script: str = Field(..., description=common_desc['test_script'])
     docstring: Optional[str] = Field(None, description=common_desc['docstring'])
+   
 
 class PythonFunctionScriptWithLineNumber(BaseModel):
     """Python function and test script with line number for display and editing"""
@@ -96,6 +117,7 @@ class PythonFunctionScriptChanges(BaseModel):
     function_script_changes: Optional[List[Change]] = Field(None, description="List of changes to the function script.")
     updated_pip_packages: List[str] = Field(..., description="Updated pip packages.")
     test_script_changes: Optional[List[Change]] = Field(None, description="List of changes to the test script.")
+    experience: Optional[ExperienceMemory] = Field(None, description="Experience for successfully fixing the errors, this will be noted down in the long term memory to avoid making the same mistake again.")
 
 class PythonFunctionRequirement(BaseModel):
     """Python Function Requirement
@@ -127,3 +149,5 @@ class SoftwareRequirement(BaseModel):
     python_function_requirements: Optional[list[PythonFunctionRequirement]] = Field(..., description="A list of requirements for the python functions which will be called in the web UI.")
     react_ui_requirements: Optional[ReactUIRequirement] = Field(description="User interface requirements for the react.js web UI. The UI will be used to interact with the user and call the python functions (made available under a global variable named `pythonFunctions` using imjoy-rpc). E.g. `pythonFunctions.load_data(...)` can be called in a button click callback.")
     additional_notes: str = Field(default="", description="Any additional notes or requirements that need to be considered.")
+
+
