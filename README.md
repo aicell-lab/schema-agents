@@ -3,17 +3,7 @@
 A schema-based LLM framework for building multi-agent collaborative systems.
 
 ## Development
-
-Clone the repository:
-
-```
-git clone https://github.com/aicell-lab/schema-agents.git
-cd schema-agents
-```
-
 Create a conda environment and install dependencies:
-
-
 ```
 conda create -n schema-agents python=3.10
 conda activate schema-agents

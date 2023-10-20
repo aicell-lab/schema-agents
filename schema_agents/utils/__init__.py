@@ -10,7 +10,6 @@ import os
 import subprocess
 import tempfile
 
-from schema_agents.utils.read_document import read_docx
 from schema_agents.utils.singleton import Singleton
 from schema_agents.utils.token_counter import (
     TOKEN_COSTS,
