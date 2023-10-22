@@ -6,8 +6,9 @@
 @File    : const.py
 """
 import os
+from pathlib import Path
 
-PROJECT_ROOT = os.environ.get('PROJECT_ROOT', os.getcwd())
+PROJECT_ROOT = Path(os.environ.get('PROJECT_ROOT', os.getcwd()))
 DATA_PATH = PROJECT_ROOT / 'data'
 
 MEM_TTL = 24 * 30 * 3600
