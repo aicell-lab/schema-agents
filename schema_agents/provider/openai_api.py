@@ -7,6 +7,8 @@
 """
 import asyncio
 import time
+import random
+import string
 from functools import wraps
 from typing import NamedTuple, Union, List, Dict, Any
 
@@ -160,6 +162,8 @@ class OpenAIGPTAPI(BaseGPTAPI, RateLimiter):
         collected_messages = []
         function_call_detected = False
         func_call = {}
+        sid = ''.join(random.choices(string.ascii_lowercase + string.digits, k=8))
+        
         # iterate through the stream of events
         async for chunk in response:
             collected_chunks.append(chunk)  # save the event response
@@ -180,14 +184,14 @@ class OpenAIGPTAPI(BaseGPTAPI, RateLimiter):
             if event_bus:
                 if function_call_detected:
                     if "function_call" in chunk_message and "name" in chunk_message["function_call"]:
-                        event_bus.emit("stream", {"type": "function_call", "name": func_call["name"], "arguments": func_call["arguments"], "status": "start"})
+                        event_bus.emit("stream", {"sid": sid, "type": "function_call", "name": func_call["name"], "arguments": func_call["arguments"], "status": "start"})
                     elif chunk["choices"][0].get("finish_reason") in ["function_call", "stop"]:
-                        event_bus.emit("function-call", func_call)
-                        event_bus.emit("stream", {"type": "function_call", "name": func_call["name"], "arguments": func_call["arguments"], "status": "finished"})
+                        event_bus.emit("function_call", func_call)
+                        event_bus.emit("stream", {"sid": sid, "type": "function_call", "name": func_call["name"], "arguments": func_call["arguments"], "status": "finished"})
                     else:
-                        event_bus.emit("stream", {"type": "function_call", "name": func_call["name"], "arguments": func_call["arguments"], "status": "in_progress"})
+                        event_bus.emit("stream", {"sid": sid, "type": "function_call", "name": func_call["name"], "arguments": func_call["arguments"], "status": "in_progress"})
                 elif "content" in chunk_message and chunk_message["content"]:
-                    event_bus.emit("stream", {"type": "text", "content": chunk_message["content"]})
+                    event_bus.emit("stream", {"sid": sid, "type": "text", "content": chunk_message["content"]})
 
         # if function_call_detected:
         #     print(")", end="")
