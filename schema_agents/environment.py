@@ -34,7 +34,7 @@ class Environment(BaseModel):
         if role.user_support_actions:
             self.user_support_roles.add(role)
         if self.event_bus is not None:
-            self.event_bus.emit("role-add", role)
+            self.event_bus.emit("role_add", role)
 
     def add_roles(self, roles: Iterable[Role]):
         """增加一批在当前环境的Role"""
