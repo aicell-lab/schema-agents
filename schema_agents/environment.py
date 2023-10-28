@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 from schema_agents.memory import Memory
 from schema_agents.role import Role
 from schema_agents.schema import Message
-
+from schema_agents.utils.common import EventBus
 
 class Environment(BaseModel):
     """环境，承载一批角色，角色可以向环境发布消息，可以被其他角色观察到"""
@@ -21,8 +21,8 @@ class Environment(BaseModel):
     roles: dict[str, Role] = Field(default_factory=dict)
     memory: Memory = Field(default_factory=Memory)
     history: str = Field(default='')
-    message_callback: str = None
     user_support_roles: set[Role] = Field(default_factory=set)
+    event_bus: EventBus = None
 
     class Config:
         arbitrary_types_allowed = True
@@ -33,7 +33,8 @@ class Environment(BaseModel):
         self.roles[role.profile] = role
         if role.user_support_actions:
             self.user_support_roles.add(role)
-            
+        if self.event_bus is not None:
+            self.event_bus.emit("role-add", role)
 
     def add_roles(self, roles: Iterable[Role]):
         """增加一批在当前环境的Role"""
@@ -45,9 +46,8 @@ class Environment(BaseModel):
         # self.message_queue.put(message)
         self.memory.add(message)
         self.history += f"\n{message}"
-        if self.message_callback is not None:
-            loop = asyncio.get_running_loop()
-            loop.create_task(self.message_callback(message))
+        if self.event_bus is not None:
+            self.event_bus.emit("message", message)
 
     async def run(self, k=1):
         """处理一次所有Role的运行"""
@@ -62,6 +62,8 @@ class Environment(BaseModel):
                 futures.append(future)
 
             await asyncio.gather(*futures)
+            if self.event_bus is not None:
+                self.event_bus.emit("run", None)
 
     def get_roles(self) -> dict[str, Role]:
         """获得环境内的所有Role"""

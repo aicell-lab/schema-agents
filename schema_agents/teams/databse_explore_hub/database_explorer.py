@@ -3,6 +3,7 @@ from typing import List, Dict, Optional, Union
 import asyncio
 from schema_agents.role import Role, Action
 from schema_agents.schema import Message
+from schema_agents.teams import Team
 
 import os
 import urllib.request
