@@ -11,7 +11,7 @@ from schema_agents.environment import Environment
 from schema_agents.logs import logger
 from schema_agents.role import Role
 from schema_agents.schema import Message
-from schema_agents.utils.common import NoMoneyException
+from schema_agents.utils.common import NoMoneyException, EventBus
 
 
 class Team(BaseModel):
@@ -22,9 +22,14 @@ class Team(BaseModel):
     environment: Environment = Field(default_factory=Environment)
     investment: float = Field(default=10.0)
     idea: str = Field(default="")
+    event_bus: EventBus = Field(default_factory=EventBus)
 
     class Config:
         arbitrary_types_allowed = True
+
+    def __init__(self, **data):
+        super().__init__(**data)
+        self.environment.event_bus = self.event_bus
 
     def hire(self, roles: list[Role]):
         """Hire roles to cooperate"""
@@ -40,10 +45,9 @@ class Team(BaseModel):
         if CONFIG.total_cost > CONFIG.max_budget:
             raise NoMoneyException(CONFIG.total_cost, f'Insufficient funds: {CONFIG.max_budget}')
 
-    def start(self, idea, message_callback: callable = None):
+    def start(self, idea):
         """Start a project from publishing boss requirement."""
         self.idea = idea
-        self.environment.message_callback = message_callback
         self.environment.publish_message(Message(role="User", content=idea))
 
     def _save(self):

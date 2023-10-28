@@ -21,6 +21,7 @@ from schema_agents.llm import LLM
 from schema_agents.logs import logger
 from schema_agents.schema import Message
 from schema_agents.memory.long_term_memory import LongTermMemory
+from schema_agents.utils.common import EventBus
 from pydantic import BaseModel, Field
 from tenacity import retry, stop_after_attempt, wait_fixed
 
@@ -72,7 +73,7 @@ class RoleContext(BaseModel):
 
 class Role:
     """角色/代理"""
-    def __init__(self, name="", profile="", goal="", constraints=None, desc="", long_term_memory: Optional[LongTermMemory]=None):
+    def __init__(self, name="", profile="", goal="", constraints=None, desc="", long_term_memory: Optional[LongTermMemory]=None, event_bus:EventBus =None):
         self._llm = LLM()
         self._setting = RoleSetting(name=name, profile=profile, goal=goal, constraints=constraints, desc=desc)
         self._states = []
@@ -84,7 +85,8 @@ class Role:
         self._action_index = {}
         self._user_support_actions = []
         self.long_term_memory = long_term_memory
-        
+        self._event_bus = event_bus
+
     def _reset(self):
         self._states = []
         self._actions = []
@@ -105,6 +107,17 @@ class Role:
     def set_env(self, env: 'Environment'):
         """设置角色工作所处的环境，角色可以向环境说话，也可以通过观察接受环境消息"""
         self._rc.env = env
+        if self._event_bus is not None:
+            raise ValueError("Event bus is already set")
+        self._event_bus = env.event_bus
+    
+    def set_event_bus(self, event_bus: EventBus):
+        """Set event bus."""
+        self._event_bus = event_bus
+    
+    def get_event_bus(self):
+        """Get event bus."""
+        return self._event_bus
 
     @property
     def profile(self):
@@ -185,13 +198,13 @@ class Role:
         return rsp
 
     @staticmethod
-    def create(name, profile, goal, constraints=None, actions=None, desc='', long_term_memory: Optional[LongTermMemory]=None):
+    def create(name, profile, goal, constraints=None, actions=None, desc='', long_term_memory: Optional[LongTermMemory]=None, event_bus:EventBus =None):
         # Convert the profile into a valid class name
         class_name = re.sub(r'\W+', '', profile.replace(' ', ''))
 
         # Define the __init__ method for the new class
         def __init__(self, name=name, profile=profile, goal=goal, constraints=constraints, desc=desc):
-            super(self.__class__, self).__init__(name=name, profile=profile, goal=goal, constraints=constraints, desc=desc, long_term_memory=long_term_memory)
+            super(self.__class__, self).__init__(name=name, profile=profile, goal=goal, constraints=constraints, desc=desc, long_term_memory=long_term_memory, event_bus=event_bus)
             self._init_actions(actions or [])
 
         # Create the new class with 'type'
@@ -309,7 +322,8 @@ class Role:
                        input_schema: Optional[BaseModel] = None,
                        system_msgs: Optional[list[str]] = None,
                        schemas: List[BaseModel]=None,
-                       function_call: Union[str, Dict[str, str]]=None) -> ActionOutput:
+                       function_call: Union[str, Dict[str, str]]=None
+                       ) -> ActionOutput:
         """Append default prefix, support pydantic schema"""
         if not system_msgs:
             system_msgs = []
@@ -339,7 +353,7 @@ class Role:
             if p["role"] == "function":
                 assert set(p.keys()) == {"name", "content", "role"}, f"If input_schema is provided, prompt must have keys 'name', 'content', 'role', but got {prompt.keys()}"
                 assert json.loads(p["content"]), "prompt['content'] must be a valid json string"
-        content = await self._llm.aask(prompt, system_msgs, functions=functions, function_call=function_call)
+        content = await self._llm.aask(prompt, system_msgs, functions=functions, function_call=function_call, event_bus=self._event_bus)
         logger.debug(content)
         if isinstance(content, str):
             return content
@@ -403,14 +417,14 @@ class Role:
         
         if output_schema is str:
             function_call = "none"
-            return await self._llm.aask(messages, system_msgs, functions=[input_schema] if input_schema else [], function_call=function_call)
+            return await self._llm.aask(messages, system_msgs, functions=[input_schema] if input_schema else [], function_call=function_call, event_bus=self._event_bus)
 
         functions = [schema_to_function(s) for s in set(output_types + ([input_schema] if input_schema else []))]
         if len(output_types) == 1:
             function_call = {"name": output_types[0].__name__}
         else:
             function_call = "auto"
-        response = await self._llm.aask(messages, system_msgs, functions=functions, function_call=function_call)
+        response = await self._llm.aask(messages, system_msgs, functions=functions, function_call=function_call, event_bus=self._event_bus)
         try:
             schema_names = ",".join([f"`{s.__name__}`" for s in output_types])
             assert not isinstance(response, str), f"Invalid response, you MUST call one of the following functions: {schema_names}. DO NOT return text directly."
@@ -421,7 +435,7 @@ class Role:
         except Exception:
             messages.append({"role": "assistant", "content": str(response)})
             messages.append({"role": "user", "content": f"Failed to parse the response, error:\n{traceback.format_exc()}\nPlease regenerate to fix the error."})
-            response = await self._llm.aask(messages, system_msgs, functions=functions, function_call=function_call)
+            response = await self._llm.aask(messages, system_msgs, functions=functions, function_call=function_call, event_bus=self._event_bus)
             assert response["name"] in [s.__name__ for s in output_types], f"Invalid function name: {response['name']}"
             idx = [s.__name__ for s in output_types].index(response["name"])
             arguments = json.loads(response["arguments"])
