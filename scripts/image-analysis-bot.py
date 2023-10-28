@@ -43,10 +43,18 @@ async def chat(msg, client, context=None):
         if client:
             await client.appendText({"messageId": msg.messageId, "text": text})
     
+    async def stream_callback(message):
+        if message["type"] == "function_call":
+            print(message["name"], message["status"], message["arguments"])
+        elif message["type"] == "text":
+            print(message["content"])
+
     hub = ImageAnalysisHub()
     hub.invest(0.5)
     hub.recruit(client)
-    hub.start(msg.text, message_callback=message_callback)
+    hub.event_bus.on("stream", stream_callback)
+    hub.event_bus.on("message", message_callback)
+    hub.start(msg.text)
     await hub.run(n_round=10)
 
 async def test_chat():
