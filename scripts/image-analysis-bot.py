@@ -45,7 +45,10 @@ async def chat(msg, client, context=None):
     
     async def stream_callback(message):
         if message["type"] == "function_call":
-            print(message["name"], message["status"], message["arguments"])
+            if message["status"] == "in_progress":
+                print(message["arguments"], end="")
+            else:
+                print(message["name"], message["status"], message["arguments"])
         elif message["type"] == "text":
             print(message["content"])
 

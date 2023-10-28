@@ -188,8 +188,8 @@ class OpenAIGPTAPI(BaseGPTAPI, RateLimiter):
                     elif chunk["choices"][0].get("finish_reason") in ["function_call", "stop"]:
                         event_bus.emit("function_call", func_call)
                         event_bus.emit("stream", {"sid": sid, "type": "function_call", "name": func_call["name"], "arguments": func_call["arguments"], "status": "finished"})
-                    else:
-                        event_bus.emit("stream", {"sid": sid, "type": "function_call", "name": func_call["name"], "arguments": func_call["arguments"], "status": "in_progress"})
+                    elif  "function_call" in chunk_message and "arguments" in chunk_message["function_call"]:
+                        event_bus.emit("stream", {"sid": sid, "type": "function_call", "name": func_call["name"], "arguments": chunk_message["function_call"]["arguments"], "status": "in_progress"})
                 elif "content" in chunk_message and chunk_message["content"]:
                     event_bus.emit("stream", {"sid": sid, "type": "text", "content": chunk_message["content"]})
 
