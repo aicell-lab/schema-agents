@@ -17,7 +17,7 @@ from typing import Any, Dict, List, Optional, Type, Union, get_args, get_origin
 
 from schema_agents.llm import LLM
 from schema_agents.logs import logger
-from schema_agents.utils.common import OutputParser
+from schema_agents.utils.common import OutputParser, EventBus
 from pydantic import BaseModel, create_model, root_validator, validator
 from tenacity import retry, stop_after_attempt, wait_fixed
 
@@ -230,24 +230,25 @@ class Action(ABC):
     def __repr__(self):
         return self.__str__()
 
-    async def _aask(self, prompt: str, system_msgs: Optional[list[str]] = None) -> str:
+    async def _aask(self, prompt: str, system_msgs: Optional[list[str]] = None, event_bus:EventBus = None) -> str:
         """Append default prefix"""
         if not system_msgs:
             system_msgs = []
         if self.prefix:
             system_msgs.append(self.prefix)
-        return await self.llm.aask(prompt, system_msgs)
+        return await self.llm.aask(prompt, system_msgs, event_bus=event_bus)
 
     @retry(stop=stop_after_attempt(2), wait=wait_fixed(1))
     async def _aask_v1(self, prompt: str, output_class_name: str,
                        output_data_mapping: dict,
-                       system_msgs: Optional[list[str]] = None) -> ActionOutput:
+                       system_msgs: Optional[list[str]] = None,
+                       event_bus:EventBus = None) -> ActionOutput:
         """Append default prefix"""
         if not system_msgs:
             system_msgs = []
         if self.prefix:
             system_msgs.append(self.prefix)
-        content = await self.llm.aask(prompt, system_msgs)
+        content = await self.llm.aask(prompt, system_msgs, event_bus=event_bus)
         logger.debug(content)
         output_class = ActionOutput.create_model_class(output_class_name, output_data_mapping)
         parsed_data = OutputParser.parse_data_with_mapping(content, output_data_mapping)
@@ -262,7 +263,8 @@ class Action(ABC):
                        input_schema: Optional[BaseModel] = None,
                        system_msgs: Optional[list[str]] = None,
                        schemas: List[BaseModel]=None,
-                       function_call: Union[str, Dict[str, str]]=None) -> ActionOutput:
+                       function_call: Union[str, Dict[str, str]]=None,
+                       event_bus: EventBus=None) -> ActionOutput:
         """Append default prefix, support pydantic schema"""
         if not system_msgs:
             system_msgs = []
@@ -294,7 +296,7 @@ class Action(ABC):
             if p["role"] == "function":
                 assert set(p.keys()) == {"name", "content", "role"}, f"If input_schema is provided, prompt must have keys 'name', 'content', 'role', but got {prompt.keys()}"
                 assert json.loads(p["content"]), "prompt['content'] must be a valid json string"
-        content = await self.llm.aask(prompt, system_msgs, functions=functions, function_call=function_call)
+        content = await self.llm.aask(prompt, system_msgs, functions=functions, function_call=function_call, event_bus=event_bus)
         logger.debug(content)
         if isinstance(content, str):
             return ActionOutput(content, None)
