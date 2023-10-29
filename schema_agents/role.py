@@ -11,9 +11,10 @@ import types
 import typing
 from functools import partial
 from inspect import signature
-from typing import Dict, Iterable, List, Optional, Type, Union
+from typing import Iterable, Optional, Union, Callable
+from pydantic import BaseModel
 
-from schema_agents.action import (Action, ActionOutput, parse_special_json,
+from schema_agents.utils import (parse_special_json,
                               schema_to_function)
 # from schema_agents.environment import Environment
 from schema_agents.memory import Memory
@@ -49,8 +50,7 @@ class RoleContext(BaseModel):
     env: 'Environment' = Field(default=None)
     memory: Memory = Field(default_factory=Memory)
     state: int = Field(default=0)
-    todo: Action = Field(default=None)
-    watch: set[Type[Action]] = Field(default_factory=set)
+    watch: set[Union[str, BaseModel]] = Field(default_factory=set)
     args: BaseModel = Field(default_factory=BaseModel)
 
     class Config:
@@ -62,22 +62,20 @@ class RoleContext(BaseModel):
     @property
     def important_memory(self) -> list[Message]:
         """获得关注动作对应的信息"""
-        actions = [f for f in self.watch if isinstance(f, Action)]
         schemas = [f for f in self.watch if f is str or inspect.isclass(f) and issubclass(f, BaseModel)]
-        return self.memory.get_by_actions(actions) + self.memory.get_by_schemas(schemas)
+        return self.memory.get_by_schemas(schemas)
 
     @property
     def history(self) -> list[Message]:
         return self.memory.get()
 
-
 class Role:
     """角色/代理"""
-    def __init__(self, name="", profile="", goal="", constraints=None, desc="", long_term_memory: Optional[LongTermMemory]=None, event_bus:EventBus =None):
+    def __init__(self, name="", profile="", goal="", constraints=None, desc="", long_term_memory: Optional[LongTermMemory]=None, event_bus:EventBus =None, actions: list[Callable] = None):
         self._llm = LLM()
         self._setting = RoleSetting(name=name, profile=profile, goal=goal, constraints=constraints, desc=desc)
         self._states = []
-        self._actions = []
+        self._actions = actions or []
         self._role_id = str(self._setting)
         self._rc = RoleContext(role=self)
         self._input_schemas = []
@@ -86,23 +84,18 @@ class Role:
         self._user_support_actions = []
         self.long_term_memory = long_term_memory
         self._event_bus = event_bus
+        self._init_actions(self._actions)
 
     def _reset(self):
         self._states = []
         self._actions = []
 
 
-    def _watch(self, actions: Iterable[Type[Action]]):
+    def _watch(self, actions: Iterable[Union[str, BaseModel]]):
         """监听对应的行为"""
         self._rc.watch.update(actions)
         # check RoleContext after adding watch actions
         self._rc.check(self._role_id)
-
-    def _set_state(self, state):
-        """Update the current state."""
-        self._rc.state = state
-        logger.debug(self._actions)
-        self._rc.todo = self._actions[self._rc.state]
 
     def set_env(self, env: 'Environment'):
         """设置角色工作所处的环境，角色可以向环境说话，也可以通过观察接受环境消息"""
@@ -136,10 +129,9 @@ class Role:
         if not self._rc.env:
             return 0
         env_msgs = self._rc.env.memory.get()
-        
-        actions = [f for f in self._rc.watch if isinstance(f, Action)]
+
         schemas = [f for f in self._rc.watch if f is str or inspect.isclass(f) and issubclass(f, BaseModel)]
-        observed = self._rc.env.memory.get_by_actions(actions) + self._rc.env.memory.get_by_schemas(schemas)
+        observed = self._rc.env.memory.get_by_schemas(schemas)
 
         news = self._rc.memory.remember(observed)  # remember recent exact or similar memories
 
@@ -174,16 +166,9 @@ class Role:
 
         return await self._react()
 
-    async def run(self, message=None):
+    async def run(self):
         """观察，并基于观察的结果思考、行动"""
-        if message:
-            if isinstance(message, str):
-                message = Message(message)
-            if isinstance(message, Message):
-                self.recv(message)
-            if isinstance(message, list):
-                self.recv(Message("\n".join(message)))
-        elif not await self._observe():
+        if not await self._observe():
             # 如果没有任何新信息，挂起等待
             logger.debug(f"{self._setting}: no news. waiting.")
             return
@@ -204,8 +189,7 @@ class Role:
 
         # Define the __init__ method for the new class
         def __init__(self, name=name, profile=profile, goal=goal, constraints=constraints, desc=desc):
-            super(self.__class__, self).__init__(name=name, profile=profile, goal=goal, constraints=constraints, desc=desc, long_term_memory=long_term_memory, event_bus=event_bus)
-            self._init_actions(actions or [])
+            super(self.__class__, self).__init__(name=name, profile=profile, goal=goal, constraints=constraints, desc=desc, long_term_memory=long_term_memory, event_bus=event_bus, actions=actions)
 
         # Create the new class with 'type'
         return type(class_name, (Role,), {'__init__': __init__})
@@ -250,15 +234,7 @@ class Role:
         
         self._reset()
         for idx, action in enumerate(actions):
-            if inspect.isclass(action) and issubclass(action, Action):
-                i = action("")
-                i.set_prefix(self._get_prefix(), self.profile)
-            elif isinstance(action, Action):
-                i = action
-                i.set_prefix(self._get_prefix(), self.profile)
-            else:
-                i = action
-            self._actions.append(i)
+            self._actions.append(action)
             self._states.append(f"{idx}. {action}")
     
     async def _run_action(self, action, context):
@@ -315,56 +291,6 @@ class Role:
             outputs.append(output)
                   
         return outputs
-
-    @retry(stop=stop_after_attempt(2), wait=wait_fixed(1))
-    async def _aask_v2(self, prompt: Union[str, Dict[str, str]],
-                       output_schema: Optional[BaseModel] = None,
-                       input_schema: Optional[BaseModel] = None,
-                       system_msgs: Optional[list[str]] = None,
-                       schemas: List[BaseModel]=None,
-                       function_call: Union[str, Dict[str, str]]=None
-                       ) -> ActionOutput:
-        """Append default prefix, support pydantic schema"""
-        if not system_msgs:
-            system_msgs = []
-        
-        functions = []
-        schema_dict = {}
-        schemas = schemas or []
-
-        if input_schema and input_schema not in schemas:
-            schemas.append(input_schema)
-        if output_schema and output_schema not in schemas:
-            schemas.append(output_schema)
-
-        for schema in schemas:
-            functions.append(schema_to_function(schema))
-            schema_dict[schema.__name__] = schema
-
-        if output_schema:
-            function_call = function_call or {"name": output_schema.__name__}
-        if isinstance(prompt, dict):
-            assert input_schema is not None, f"If prompt is dict, input_schema must be provided, but got {input_schema}"
-        if isinstance(prompt, dict):
-            prompt = [prompt]
-        if input_schema is not None:
-            assert isinstance(prompt, list), f"If input_schema is provided, prompt must be dict or list, but got {type(prompt)}"
-        for p in prompt:
-            if p["role"] == "function":
-                assert set(p.keys()) == {"name", "content", "role"}, f"If input_schema is provided, prompt must have keys 'name', 'content', 'role', but got {prompt.keys()}"
-                assert json.loads(p["content"]), "prompt['content'] must be a valid json string"
-        content = await self._llm.aask(prompt, system_msgs, functions=functions, function_call=function_call, event_bus=self._event_bus)
-        logger.debug(content)
-        if isinstance(content, str):
-            return content
-        assert content['name'] in schema_dict.keys(), f"Function name {content['name']} is not in schema_dict {schema_dict.keys()}"
-        try:
-            args = parse_special_json(content['arguments'])
-        except json.JSONDecodeError:
-            logger.error(f"Failed to parse arguments: {content['arguments']}")
-            raise
-        arguments = schema_dict[content['name']].parse_obj(args)
-        return arguments
 
     # @retry(stop=stop_after_attempt(2), wait=wait_fixed(1))
     async def aask(self, req, output_schema=None, prompt=None):

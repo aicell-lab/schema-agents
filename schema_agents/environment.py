@@ -49,21 +49,21 @@ class Environment(BaseModel):
         if self.event_bus is not None:
             self.event_bus.emit("message", message)
 
-    async def run(self, k=1):
+    async def run(self):
         """处理一次所有Role的运行"""
         # while not self.message_queue.empty():
         # message = self.message_queue.get()
         # rsp = await self.manager.handle(message, self)
         # self.message_queue.put(rsp)
-        for _ in range(k):
-            futures = []
-            for role in self.roles.values():
-                future = role.run()
-                futures.append(future)
+        futures = []
+        for role in self.roles.values():
+            future = role.run()
+            futures.append(future)
 
-            await asyncio.gather(*futures)
-            if self.event_bus is not None:
-                self.event_bus.emit("run", None)
+        responses = await asyncio.gather(*futures)
+        if self.event_bus is not None:
+            self.event_bus.emit("run", responses)
+        return responses
 
     def get_roles(self) -> dict[str, Role]:
         """获得环境内的所有Role"""

@@ -80,7 +80,9 @@ async def test_microscope():
         text: str
     
     await chat(Message(text="acquire an image every 1 second for 3.5 seconds", messageId="123"), client, {"user": {"id": "github|478667"}})
-
+    loop = asyncio.get_event_loop()
+    loop.stop()
+    
 async def main():
     client_id = str(uuid.uuid3(uuid.NAMESPACE_DNS, f'urn:node:{hex(uuid.getnode())}'))
     # token = login({"server_url": SERVER_URL})
