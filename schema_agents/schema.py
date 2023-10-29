@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Type, TypedDict
+from typing import TypedDict, Callable
 
 from pydantic import BaseModel
 
@@ -26,11 +26,10 @@ class Message:
     content: str
     instruct_content: BaseModel = field(default=None)
     role: str = field(default='user')  # system / user / assistant
-    cause_by: Type["Action"] = field(default="")
+    cause_by: Callable = field(default=None)
     processed_by: set['Role'] = field(default_factory=set)
 
     def __str__(self):
-        # prefix = '-'.join([self.role, str(self.cause_by)])
         return f"{self.role}: {self.content}"
 
     def __repr__(self):
@@ -72,7 +71,6 @@ class MemoryChunk:
     category: str = field(default=None)
 
     def __str__(self):
-        # prefix = '-'.join([self.role, str(self.cause_by)])
         return f"memory chunk: {self.index}"
 
     def __repr__(self):
