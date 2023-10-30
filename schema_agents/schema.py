@@ -28,6 +28,7 @@ class Message:
     role: str = field(default='user')  # system / user / assistant
     cause_by: Callable = field(default=None)
     processed_by: set['Role'] = field(default_factory=set)
+    session_ids: list[str] = field(default_factory=list)
 
     def __str__(self):
         return f"{self.role}: {self.content}"

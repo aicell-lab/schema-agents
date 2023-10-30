@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
-import re
+import uuid
 import traceback
 import types
 import typing
@@ -14,21 +14,16 @@ from inspect import signature
 from typing import Iterable, Optional, Union, Callable
 from pydantic import BaseModel
 
+from schema_agents.logs import logger
 from schema_agents.utils import (parse_special_json,
                               schema_to_function)
-# from schema_agents.environment import Environment
-from schema_agents.memory import Memory
 from schema_agents.llm import LLM
-from schema_agents.logs import logger
 from schema_agents.schema import Message
 from schema_agents.memory.long_term_memory import LongTermMemory
 from schema_agents.utils.common import EventBus
-from pydantic import BaseModel, Field
-from tenacity import retry, stop_after_attempt, wait_fixed
+from pydantic import BaseModel
 
 PREFIX_TEMPLATE = """You are a {profile}, named {name}, your goal is {goal}, and the constraint is {constraints}. """
-
-
 
 class RoleSetting(BaseModel):
     """角色设定"""
@@ -45,30 +40,6 @@ class RoleSetting(BaseModel):
         return self.__str__()
 
 
-class RoleContext(BaseModel):
-    """角色运行时上下文"""
-    env: 'Environment' = Field(default=None)
-    memory: Memory = Field(default_factory=Memory)
-    state: int = Field(default=0)
-    watch: set[Union[str, BaseModel]] = Field(default_factory=set)
-    args: BaseModel = Field(default_factory=BaseModel)
-
-    class Config:
-        arbitrary_types_allowed = True
-
-    def check(self, role_id: str):
-        pass
-
-    @property
-    def important_memory(self) -> list[Message]:
-        """获得关注动作对应的信息"""
-        schemas = [f for f in self.watch if f is str or inspect.isclass(f) and issubclass(f, BaseModel)]
-        return self.memory.get_by_schemas(schemas)
-
-    @property
-    def history(self) -> list[Message]:
-        return self.memory.get()
-
 class Role:
     """角色/代理"""
     def __init__(self, name="", profile="", goal="", constraints=None, desc="", long_term_memory: Optional[LongTermMemory]=None, event_bus:EventBus =None, actions: list[Callable] = None):
@@ -77,13 +48,16 @@ class Role:
         self._states = []
         self._actions = actions or []
         self._role_id = str(self._setting)
-        self._rc = RoleContext(role=self)
         self._input_schemas = []
         self._output_schemas = []
         self._action_index = {}
         self._user_support_actions = []
+        self._watch_actions = set()
         self.long_term_memory = long_term_memory
-        self._event_bus = event_bus
+        if event_bus:
+            self.set_event_bus(event_bus)
+        else:
+            self.set_event_bus(EventBus(f"{self._setting.profile} - {self._setting.name}"))
         self._init_actions(self._actions)
 
     def _reset(self):
@@ -93,20 +67,20 @@ class Role:
 
     def _watch(self, actions: Iterable[Union[str, BaseModel]]):
         """监听对应的行为"""
-        self._rc.watch.update(actions)
-        # check RoleContext after adding watch actions
-        self._rc.check(self._role_id)
-
-    def set_env(self, env: 'Environment'):
-        """设置角色工作所处的环境，角色可以向环境说话，也可以通过观察接受环境消息"""
-        self._rc.env = env
-        if self._event_bus is not None:
-            raise ValueError("Event bus is already set")
-        self._event_bus = env.event_bus
+        self._watch_actions.update(actions)
     
     def set_event_bus(self, event_bus: EventBus):
         """Set event bus."""
         self._event_bus = event_bus
+
+        async def handle_message(msg):
+            if msg.instruct_content and type(msg.instruct_content) in self._watch_actions:
+                await self.handle(msg)
+            elif msg.instruct_content is None and str in self._watch_actions:
+                await self.handle(msg)
+
+        self._event_bus.on("message", handle_message)
+        logger.info(f"Mounting {self._setting} to event bus: {self._event_bus.name}.")
     
     def get_event_bus(self):
         """Get event bus."""
@@ -122,79 +96,6 @@ class Role:
         if self._setting.desc:
             return self._setting.desc
         return PREFIX_TEMPLATE.format(**self._setting.dict())
-
-
-    async def _observe(self) -> int:
-        """从环境中观察，获得重要信息，并加入记忆"""
-        if not self._rc.env:
-            return 0
-        env_msgs = self._rc.env.memory.get()
-
-        schemas = [f for f in self._rc.watch if f is str or inspect.isclass(f) and issubclass(f, BaseModel)]
-        observed = self._rc.env.memory.get_by_schemas(schemas)
-
-        news = self._rc.memory.remember(observed)  # remember recent exact or similar memories
-
-        for i in env_msgs:
-            self.recv(i)
-
-        news_text = [f"{i.role}: {i.content[:20]}..." for i in news]
-        if news_text:
-            logger.debug(f'{self._setting} observed: {news_text}')
-        return len(news)
-
-    def _publish_message(self, msg):
-        """如果role归属于env，那么role的消息会向env广播"""
-        if not self._rc.env:
-            # 如果env不存在，不发布消息
-            return
-        self._rc.env.publish_message(msg)
-
-
-    def recv(self, message: Message) -> None:
-        """add message to history."""
-        # self._history += f"\n{message}"
-        # self._context = self._history
-        if message in self._rc.memory.get():
-            return
-        self._rc.memory.add(message)
-
-    async def handle(self, message: Message) -> list[Message]:
-        """接收信息，并用行动回复"""
-        # logger.debug(f"{self.name=}, {self.profile=}, {message.role=}")
-        self.recv(message)
-
-        return await self._react()
-
-    async def run(self):
-        """观察，并基于观察的结果思考、行动"""
-        if not await self._observe():
-            # 如果没有任何新信息，挂起等待
-            logger.debug(f"{self._setting}: no news. waiting.")
-            return
-
-        rsp = await self._react()
-        # 将回复发布到环境，等待下一个订阅者处理
-        if isinstance(rsp, list):
-            for msg in rsp:
-                self._publish_message(msg)
-        else:
-            self._publish_message(rsp)
-        return rsp
-
-    @staticmethod
-    def create(name, profile, goal, constraints=None, actions=None, desc='', long_term_memory: Optional[LongTermMemory]=None, event_bus:EventBus =None):
-        # Convert the profile into a valid class name
-        class_name = re.sub(r'\W+', '', profile.replace(' ', ''))
-
-        # Define the __init__ method for the new class
-        def __init__(self, name=name, profile=profile, goal=goal, constraints=constraints, desc=desc):
-            super(self.__class__, self).__init__(name=name, profile=profile, goal=goal, constraints=constraints, desc=desc, long_term_memory=long_term_memory, event_bus=event_bus, actions=actions)
-
-        # Create the new class with 'type'
-        return type(class_name, (Role,), {'__init__': __init__})
-
-
     
     @property
     def user_support_actions(self):
@@ -237,21 +138,20 @@ class Role:
             self._actions.append(action)
             self._states.append(f"{idx}. {action}")
     
-    async def _run_action(self, action, context):
+    async def _run_action(self, action, msg):
         sig = signature(action)
         keys = [p.name for p in sig.parameters.values() if p.kind == p.POSITIONAL_OR_KEYWORD and p.annotation == Role]
         kwargs = {k: self for k in keys}
         pos = [p for p in sig.parameters.values() if p.kind == p.POSITIONAL_OR_KEYWORD and p.annotation != Role]
         for p in pos:
-            for c in context:
-                if not c.instruct_content and isinstance(c.content, str):
-                    kwargs[p.name] = c.content
-                    c.processed_by.add(self)
-                    break
-                elif c.instruct_content and isinstance(c.instruct_content, p.annotation.__args__ if isinstance(p.annotation, typing._UnionGenericAlias) else p.annotation):
-                    kwargs[p.name] = c.instruct_content
-                    c.processed_by.add(self)
-                    break
+            if not msg.instruct_content and isinstance(msg.content, str):
+                kwargs[p.name] = msg.content
+                msg.processed_by.add(self)
+                break
+            elif msg.instruct_content and isinstance(msg.instruct_content, p.annotation.__args__ if isinstance(p.annotation, typing._UnionGenericAlias) else p.annotation):
+                kwargs[p.name] = msg.instruct_content
+                msg.processed_by.add(self)
+                break
             if p.name not in kwargs:
                 kwargs[p.name] = None
         
@@ -259,38 +159,52 @@ class Role:
             return await action(**kwargs)
         else:
             return action(**kwargs)
-        
 
+    def can_handle(self, message: Message) -> bool:
+        """Check if the role can handle the message."""
+        context_class = message.instruct_content.__class__ if message.instruct_content else type(message.content)
+        if context_class in self._input_schemas:
+            return True
+        return False
+    
     # @retry(stop=stop_after_attempt(2), wait=wait_fixed(1))
-    async def _react(self) -> list[Message]:
-        context = self._rc.important_memory
-        # Only process messages that are not processed by this role
-        context = [msg for msg in context if self not in msg.processed_by]
-        assert context and isinstance(context, list)
-        responses = []
-        for msg in context:
+    async def handle(self, msg: Message) -> list[Message]:
+        if not self.can_handle(msg):
+            raise ValueError(f"Invalid message, the role {self._setting} cannot handle the message: {msg}")
+        session_id = str(uuid.uuid4())
+        msg.session_ids.append(session_id)
+        messages = []
+        def on_message(new_msg):
+            if session_id in new_msg.session_ids:
+                messages.append(new_msg)
+
+        self._event_bus.on("message", on_message)
+        try:
             context_class = msg.instruct_content.__class__ if msg.instruct_content else type(msg.content)
+            responses = []
             if context_class in self._input_schemas:
                 actions = self._action_index[context_class]
                 for action in actions:
-                    responses.append(self._run_action(action, context))
-        responses = await asyncio.gather(*responses)
-        outputs = []  
-        for response in responses:
-            if not response:
-                continue
-            # logger.info(response)
-            if isinstance(response, str):
-                output = Message(content=response, role=self.profile, cause_by=action)
-            else:
-                assert isinstance(response, BaseModel), f"Action must return pydantic BaseModel, but got {response}"
-                output = Message(content=response.json(), instruct_content=response,
-                            role=self.profile, cause_by=action)
-            # self._rc.memory.add(output)
-            # logger.debug(f"{response}")
-            outputs.append(output)
-                  
-        return outputs
+                    responses.append(self._run_action(action, msg))
+            responses = await asyncio.gather(*responses)
+            outputs = []  
+            for response in responses:
+                if not response:
+                    continue
+                # logger.info(response)
+                if isinstance(response, str):
+                    output = Message(content=response, role=self.profile, cause_by=action, session_ids=msg.session_ids.copy())
+                else:
+                    assert isinstance(response, BaseModel), f"Action must return pydantic BaseModel, but got {response}"
+                    output = Message(content=response.json(), instruct_content=response, session_ids=msg.session_ids.copy(),
+                                role=self.profile, cause_by=action)
+                # self._rc.memory.add(output)
+                # logger.debug(f"{response}")
+                outputs.append(output)
+                await self._event_bus.aemit("message", output)
+        finally:
+            self._event_bus.off("message", on_message)
+        return messages
 
     # @retry(stop=stop_after_attempt(2), wait=wait_fixed(1))
     async def aask(self, req, output_schema=None, prompt=None):
@@ -359,6 +273,7 @@ class Role:
             arguments = parse_special_json(response["arguments"])
             return output_types[idx].parse_obj(arguments)
         except Exception:
+            logger.error(f"Failed to parse the response, error:\n{traceback.format_exc()}\nPlease regenerate to fix the error.")
             messages.append({"role": "assistant", "content": str(response)})
             messages.append({"role": "user", "content": f"Failed to parse the response, error:\n{traceback.format_exc()}\nPlease regenerate to fix the error."})
             response = await self._llm.aask(messages, system_msgs, functions=functions, function_call=function_call, event_bus=self._event_bus)

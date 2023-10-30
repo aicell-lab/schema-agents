@@ -57,7 +57,7 @@ async def search(req: SearchQuery, role: Role) -> List[Union[str, Dict[str, str]
         return pdb_explorer(new_query)
     
 
-SearchManager = Role.create(name="Alice",
+search_manager = Role(name="Alice",
                                 profile="Search Manager",
                                 goal="Search for a gene in the HPA Cell Atlas and return the results.",
                                 constraints=None,
@@ -69,24 +69,4 @@ class HPADatabseExplorer(Team):
     """
     def recruit(self, client):
         """recruit roles to cooperate"""
-        UXManager = Role.create(name="Luisa",
-            profile="UX Manager",
-            goal="Focus on understanding the user's needs and experience. Understand the user needs by interacting with user and communicate these findings to the project manager by calling `UserRequirements`.",
-            constraints=None,
-            actions=[partial(clarify_user_request, client), create_user_requirements])
-
-        ProjectManager = Role.create(name="Alice",
-                    profile="Project Manager",
-                    goal="Efficiently communicate with the user and translate the user's needs into software requirements",
-                    constraints=None,
-                    actions=[create_software_requirements])
-
-        WebDeveloper  = create_web_developer(client=client)
-        DataEngineer = create_data_engineer(client=client)
-        DevOps = Role.create(name="Bruce",
-                    profile="DevOps",
-                    goal="Deploy the software to the cloud and make it available to the user.",
-                    constraints=None,
-                    actions=[deploy_app])  
-        self.environment.add_roles([UXManager(), ProjectManager(), DataEngineer(), WebDeveloper(), DevOps()]) 
-
+        pass

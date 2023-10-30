@@ -76,30 +76,30 @@ class ImageAnalysisHub(Team):
     """
     def recruit(self, client):
         """recruit roles to cooperate"""
-        UXManager = Role.create(name="Luisa",
+        ux_manager = Role(name="Luisa",
             profile="UX Manager",
             goal="Focus on understanding the user's needs and experience. Understand the user needs by interacting with user and communicate these findings to the project manager by calling `UserRequirements`.",
             constraints=None,
             actions=[partial(clarify_user_request, client), create_user_requirements])
 
-        ProjectManager = Role.create(name="Alice",
+        project_manager = Role(name="Alice",
                     profile="Project Manager",
                     goal="Efficiently communicate with the user and translate the user's needs into software requirements",
                     constraints=None,
                     actions=[create_software_requirements])
 
-        WebDeveloper  = create_web_developer(client=client)
-        DataEngineer = create_data_engineer(client=client)
-        DevOps = Role.create(name="Bruce",
+        web_developer  = create_web_developer(client=client)
+        data_engineer = create_data_engineer(client=client)
+        devops = Role(name="Bruce",
                     profile="DevOps",
                     goal="Deploy the software to the cloud and make it available to the user.",
                     constraints=None,
                     actions=[deploy_app])  
-        self.environment.add_roles([UXManager(), ProjectManager(), DataEngineer(), WebDeveloper(), DevOps()]) 
 
+        self.hire([ux_manager, project_manager, web_developer, data_engineer, web_developer, devops])
 
 async def test():
-    lab = ImageAnalysisHub()
+    lab = ImageAnalysisHub("Image Analysis Hub")
     lab.invest(0.5)
     lab.recruit(client=create_mock_client())
     lab.start("create a cell counting software")
