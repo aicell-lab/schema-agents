@@ -307,6 +307,6 @@ class EventBus:
                 if message["status"] == "in_progress":
                     print(message["arguments"], end="")
                 else:
-                    print(message["name"], message["status"], message["arguments"])
+                    print(f'\nGenerating {message["name"]} ({message["status"]}): {message["arguments"]}')
 
         self.on("stream", stream_callback)
