@@ -43,11 +43,11 @@ def actionoutout_schema_to_mapping(schema: Dict) -> Dict:
 
 class ActionOutput:
     content: str
-    instruct_content: BaseModel
+    data: BaseModel
 
-    def __init__(self, content: str, instruct_content: BaseModel):
+    def __init__(self, content: str, data: BaseModel):
         self.content = content
-        self.instruct_content = instruct_content
+        self.data = data
 
     @classmethod
     def create_model_class(cls, class_name: str, mapping: Dict[str, Type]):
@@ -72,14 +72,14 @@ class ActionOutput:
         return new_class
 
 def serialize_message(message: Message):
-    message_cp = copy.deepcopy(message)  # avoid `instruct_content` value update by reference
-    ic = message_cp.instruct_content
+    message_cp = copy.deepcopy(message)  # avoid `data` value update by reference
+    ic = message_cp.data
     if ic:
         # model create by pydantic create_model like `pydantic.main.prd`, can't pickle.dump directly
         schema = ic.schema()
         mapping = actionoutout_schema_to_mapping(schema)
 
-        message_cp.instruct_content = {
+        message_cp.data = {
             'class': schema['title'],
             'mapping': mapping,
             'value': ic.dict()
@@ -91,18 +91,18 @@ def serialize_message(message: Message):
 
 def deserialize_message(message_ser: str) -> Message:
     message = pickle.loads(message_ser)
-    if message.instruct_content:
-        ic = message.instruct_content
+    if message.data:
+        ic = message.data
         ic_obj = ActionOutput.create_model_class(class_name=ic['class'],
                                                  mapping=ic['mapping'])
         ic_new = ic_obj(**ic['value'])
-        message.instruct_content = ic_new
+        message.data = ic_new
 
     return message
 
 
 def serialize_memory(memory: MemoryChunk):
-    memory_cp = copy.deepcopy(memory)  # avoid `instruct_content` value update by reference
+    memory_cp = copy.deepcopy(memory)  # avoid `data` value update by reference
     ic = memory_cp.content
     if ic:
         # model create by pydantic create_model like `pydantic.main.prd`, can't pickle.dump directly

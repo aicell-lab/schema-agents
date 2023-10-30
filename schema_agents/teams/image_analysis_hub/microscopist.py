@@ -92,19 +92,19 @@ async def main():
 
     messages = await ms.handle(Message(content="acquire an image and save to /tmp/img.png", role="User"))
     assert len(messages) == 2
-    assert isinstance(messages[-1].instruct_content, ExecutionResult)
-    assert messages[-1].instruct_content.status == "ok"
+    assert isinstance(messages[-1].data, ExecutionResult)
+    assert messages[-1].data.status == "ok"
 
     messages = await ms.handle(Message(content="acquire image every 2nm along x, y in a 2x2um square, gradually increase exposure time from 0.1 to 2.0s", role="User"))
     assert len(messages) == 2
-    assert isinstance(messages[-1].instruct_content, ExecutionResult)
-    assert messages[-1].instruct_content.status == "ok"
+    assert isinstance(messages[-1].data, ExecutionResult)
+    assert messages[-1].data.status == "ok"
 
 
     messages = await ms.handle(Message(content="acquire an image every 1 second for 10 seconds", role="User"))
     assert len(messages) == 2
-    assert isinstance(messages[-1].instruct_content, ExecutionResult)
-    assert messages[-1].instruct_content.status == "ok"
+    assert isinstance(messages[-1].data, ExecutionResult)
+    assert messages[-1].data.status == "ok"
 
 if __name__ == "__main__":
     asyncio.run(main())

@@ -24,7 +24,7 @@ class RawMessage(TypedDict):
 class Message:
     """list[<role>: <content>]"""
     content: str
-    instruct_content: BaseModel = field(default=None)
+    data: BaseModel = field(default=None)
     role: str = field(default='user')  # system / user / assistant
     cause_by: Callable = field(default=None)
     processed_by: set['Role'] = field(default_factory=set)
