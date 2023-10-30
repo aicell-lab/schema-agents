@@ -62,11 +62,3 @@ search_manager = Role(name="Alice",
                                 goal="Search for a gene in the HPA Cell Atlas and return the results.",
                                 constraints=None,
                                 actions=[search])
-
-class HPADatabseExplorer(Team):
-    """
-    ImageAnalysisHub: a team of roles to create software for image analysis.
-    """
-    def recruit(self, client):
-        """recruit roles to cooperate"""
-        pass

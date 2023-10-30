@@ -8,7 +8,7 @@ from pydantic import BaseModel
 from imjoy_rpc.hypha import connect_to_server, login
 from schema_agents.utils import dict_to_md
 from schema_agents.config import CONFIG
-from schema_agents.teams.image_analysis_hub import ImageAnalysisHub
+from schema_agents.teams.image_analysis_hub import create_image_analysis_hub
 import logging
 from schema_agents.tools.code_interpreter import create_mock_client
 logging.basicConfig(level=logging.DEBUG)
@@ -44,10 +44,7 @@ async def chat(msg, client, context=None):
             await client.appendText({"messageId": msg.messageId, "text": text})
     
 
-
-    hub = ImageAnalysisHub()
-    hub.invest(0.5)
-    hub.recruit(client)
+    hub = create_image_analysis_hub(client=client, investment=0.5)
     event_bus = hub.get_event_bus()
     event_bus.register_default_events()
     event_bus.on("message", message_callback)
