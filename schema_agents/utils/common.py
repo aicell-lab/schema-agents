@@ -10,6 +10,7 @@ import inspect
 import os
 import re
 import asyncio
+import uuid
 from typing import List, Tuple
 
 from schema_agents.logs import logger
@@ -232,14 +233,14 @@ def print_members(module, indent=0):
         elif inspect.ismethod(obj):
             print(f'{prefix}Method: {name}')
 
-
 class EventBus:
     """An event bus class."""
 
-    def __init__(self, logger=None):
+    def __init__(self, name, logger=None):
         """Initialize the event bus."""
         self._callbacks = {}
         self._logger = logger
+        self.name = name
 
     def on(self, event_name, func):
         """Register an event callback."""
@@ -252,6 +253,27 @@ class EventBus:
         # mark once callback
         self._callbacks[event_name].once = True
         return func
+
+    async def aemit(self, event_name, *data):
+        """Trigger an event."""
+        futures = []
+        for func in self._callbacks.get(event_name, []):
+            try:
+                if inspect.iscoroutinefunction(func):
+                    futures.append(func(*data))
+                else:
+                    func(*data)
+                if hasattr(func, "once"):
+                    self.off(event_name, func)
+            except Exception as e:
+                if self._logger:
+                    self._logger.error(
+                        "Error in event callback: %s, %s, error: %s",
+                        event_name,
+                        func,
+                        e,
+                    )
+        await asyncio.gather(*futures)
 
     def emit(self, event_name, *data):
         """Trigger an event."""
@@ -278,3 +300,13 @@ class EventBus:
             del self._callbacks[event_name]
         else:
             self._callbacks.get(event_name, []).remove(func)
+
+    def register_default_events(self):
+        async def stream_callback(message):
+            if message["type"] == "function_call":
+                if message["status"] == "in_progress":
+                    print(message["arguments"], end="")
+                else:
+                    print(message["name"], message["status"], message["arguments"])
+
+        self.on("stream", stream_callback)

@@ -5,76 +5,84 @@
 @Author  : alexanderwu
 @File    : software_team.py
 """
-from typing import Union
-from pydantic import BaseModel, Field
+from typing import Union, Optional
+from pydantic import BaseModel, Field 
 from schema_agents.config import CONFIG
-from schema_agents.environment import Environment
 from schema_agents.logs import logger
 from schema_agents.role import Role
 from schema_agents.schema import Message
 from schema_agents.utils.common import NoMoneyException, EventBus
+import uuid
 
-
-class Team(BaseModel, Role):
+class Team(Role):
     """
     Team: Possesses a team, SOP (Standard Operating Procedures), and a platform for instant messaging,
     dedicated to writing executable code.
     """
-    environment: Environment = Field(default_factory=Environment)
-    investment: float = Field(default=10.0)
-    idea: str = Field(default="")
-    event_bus: EventBus = Field(default_factory=EventBus)
-
-    class Config:
-        arbitrary_types_allowed = True
-
-    def __init__(self, **data):
-        super().__init__(**data)
-        self.environment.event_bus = self.event_bus
+    def __init__(self, *args, investment=10, **kwargs):
+        super().__init__(*args, **kwargs)
+        assert not kwargs.get("actions"), "Team can't have actions."
+        self._investment: float = investment
+        self._roles = []
 
     def hire(self, roles: list[Role]):
         """Hire roles to cooperate"""
-        self.environment.add_roles(roles)
+        for role in roles:
+            role.set_event_bus(self._event_bus)
+        self._roles.extend(roles)
+    
+    def fire(self, role: Role):
+        """Fire a role"""
+        self._roles.remove(role)
+        role.set_event_bus(None)
 
     def invest(self, investment: float):
         """Invest team. raise NoMoneyException when exceed max_budget."""
-        self.investment = investment
-        CONFIG.max_budget = investment
-        logger.info(f'Investment: ${investment}.')
+        self._investment += investment
+        CONFIG.max_budget = self._investment
+        logger.info(f'Investment: ${self._investment}.')
 
     def _check_balance(self):
         if CONFIG.total_cost > CONFIG.max_budget:
             raise NoMoneyException(CONFIG.total_cost, f'Insufficient funds: {CONFIG.max_budget}')
 
-    def start(self, idea: Union[str, Message]):
-        """Start a project from publishing boss requirement."""
-        msg = Message(role="User", content=idea) if isinstance(idea, str) else idea
-        self.environment.publish_message(msg)
-
     def _save(self):
         logger.info(self.json())
-        
+    
+    def can_handle(self, message: Message) -> bool:
+        """Check if the team can handle the message."""
+        if not self._roles:
+            raise ValueError(f"Team {self.name} haven't hired anyone.")
+        for role in self._roles:
+            if role.can_handle(message):
+                return True
+        return False
+
     async def handle(self, message: Message):
         """Handle message"""
-        self._check_balance()
-        self.environment.publish_message(message)
-        return await self.environment.run()
-
-    async def run(self, n_round=1):
-        """Run team until target round or no money"""
-        responses = []
-        while n_round > 0:
-            # self._save()
-            n_round -= 1
-            logger.debug(f"{n_round=}")
+        if not self.can_handle(message):
+            raise ValueError(f"Team {self.name} can't handle message: {message}")
+        session_id = str(uuid.uuid4())
+        message.session_ids.append(session_id)
+        messages = []
+        def on_message(new_msg):
             self._check_balance()
-            responses.extend(await self.environment.run())
-        return responses
+            if session_id in new_msg.session_ids:
+                messages.append(new_msg)
+
+        self._event_bus.on("message", on_message)
+        try:
+            # start to process the message
+            await self._event_bus.aemit("message", message)
+        finally:
+            self._event_bus.off("message", on_message)
+        return messages
+        
 
 
 if __name__ == "__main__":
     import asyncio
-    team = Team()
+    team = Team(name="Software Team")
     
     async def test(message: str):
         """Test action"""
@@ -82,7 +90,3 @@ if __name__ == "__main__":
 
     team.hire([Role(profile="QA", actions=[test])])
     asyncio.run(team.handle(Message(role="User", content="I want to build a software team.")))
-
-    team.start("I want to build a software team.")
-    asyncio.run(team.run())
-    
