@@ -35,8 +35,8 @@ async def chat(msg, client, context=None):
         })
 
     async def message_callback(message):
-        if message.instruct_content:
-            content = dict_to_md(message.instruct_content.dict())
+        if message.data:
+            content = dict_to_md(message.data.dict())
         else:
             content = message.content
         text = f"# 🧑{message.role}\n\n{content}\n **💰{CONFIG.total_cost:.4f} / {CONFIG.max_budget:.4f}**\n"

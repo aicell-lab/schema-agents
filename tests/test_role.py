@@ -66,9 +66,9 @@ async def test_schema_user():
     # create a form_schema for get user name
     form_schema = json.dumps({"title": "Get User Name", "type": "object", "properties": {"name": {"type": "string"}}})
     form_dialog = FormDialogInfo(form_schema=form_schema)
-    msg = Message(content=form_dialog.json(), instruct_content=form_dialog, role="Boss")
+    msg = Message(content=form_dialog.json(), data=form_dialog, role="Boss")
     responses = await user.handle(msg)
-    assert isinstance(responses[0].instruct_content, UserClarification)
+    assert isinstance(responses[0].data, UserClarification)
 
 @pytest.mark.asyncio
 async def test_schema_str_input():
@@ -90,7 +90,7 @@ async def test_schema_str_input():
                 actions=[create_user_requirements])
     bioimage_analyst.get_event_bus().register_default_events()
     responses = await bioimage_analyst.handle(Message(role="Bot", content="Create a segmentation software"))
-    assert isinstance(responses[0].instruct_content, SoftwareRequirementDocument)
+    assert isinstance(responses[0].data, SoftwareRequirementDocument)
 
 @pytest.mark.asyncio
 async def test_schemas():
@@ -101,12 +101,12 @@ async def test_schemas():
                 actions=[clarify, search_internet])
     user.get_event_bus().register_default_events()
     responses = await user.handle(Message(role="Bot", content="Find more information on the internet about cell counting software."))
-    assert responses[0].instruct_content is None
+    assert responses[0].data is None
     assert responses[0].content == "Nothing found"
 
     instruct = GetExtraInformation(content="Tell me the use case in 1 sentence.", summary="Requesting details about the use case")
-    responses = await user.handle(Message(role="Bot", content=instruct.json(), instruct_content=instruct))
-    assert isinstance(responses[0].instruct_content, UserClarification)
+    responses = await user.handle(Message(role="Bot", content=instruct.json(), data=instruct))
+    assert isinstance(responses[0].data, UserClarification)
 
 
 
@@ -124,5 +124,5 @@ async def test_schema_str():
                 actions=[process_user_input])
     user.get_event_bus().register_default_events()
     instruct = GetExtraInformation(content="Tell me the use case in 1 sentence.", summary="Requesting details about the use case")
-    responses = await user.handle(Message(role="Bot", content=instruct.json(), instruct_content=instruct))
-    assert isinstance(responses[0].instruct_content, SearchInternetQuery)
+    responses = await user.handle(Message(role="Bot", content=instruct.json(), data=instruct))
+    assert isinstance(responses[0].data, SearchInternetQuery)

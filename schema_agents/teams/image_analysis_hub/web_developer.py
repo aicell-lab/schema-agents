@@ -130,11 +130,11 @@ async def main(context=None):
     WebDeveloper = create_web_developer(client=create_mock_client())
     wd = WebDeveloper()
     pr = SoftwareRequirement.parse_obj(mock_software_requirements)
-    req = Message(content=pr.json(), instruct_content=pr, role="Project Manager")
+    req = Message(content=pr.json(), data=pr, role="Project Manager")
     resp = await wd.handle(req)
     print(resp)
     if context is not None:
-        context['plugin'] = resp[0].instruct_content
+        context['plugin'] = resp[0].data
     
 
 if __name__ == "__main__":
