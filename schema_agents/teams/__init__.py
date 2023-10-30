@@ -58,8 +58,10 @@ class Team(Role):
                 return True
         return False
 
-    async def handle(self, message: Message):
+    async def handle(self, message: Union[str, Message]) -> list[Message]:
         """Handle message"""
+        if isinstance(message, str):
+            message = Message(role="User", content=message)
         if not self.can_handle(message):
             raise ValueError(f"Team {self.name} can't handle message: {message}")
         session_id = str(uuid.uuid4())

@@ -100,7 +100,6 @@ def create_hpa_database_explorer(client, investment):
 async def test():
     lab = create_hpa_database_explorer(client=create_mock_client())
     await lab.handle("create a cell counting software")
-    await lab.run(n_round=10)
 
 if __name__ == "__main__":
     asyncio.run(test())
