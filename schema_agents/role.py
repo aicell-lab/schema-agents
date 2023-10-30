@@ -74,9 +74,9 @@ class Role:
         self._event_bus = event_bus
 
         async def handle_message(msg):
-            if msg.instruct_content and type(msg.instruct_content) in self._watch_actions:
+            if msg.data and type(msg.data) in self._watch_actions:
                 await self.handle(msg)
-            elif msg.instruct_content is None and str in self._watch_actions:
+            elif msg.data is None and str in self._watch_actions:
                 await self.handle(msg)
 
         self._event_bus.on("message", handle_message)
@@ -144,12 +144,12 @@ class Role:
         kwargs = {k: self for k in keys}
         pos = [p for p in sig.parameters.values() if p.kind == p.POSITIONAL_OR_KEYWORD and p.annotation != Role]
         for p in pos:
-            if not msg.instruct_content and isinstance(msg.content, str):
+            if not msg.data and isinstance(msg.content, str):
                 kwargs[p.name] = msg.content
                 msg.processed_by.add(self)
                 break
-            elif msg.instruct_content and isinstance(msg.instruct_content, p.annotation.__args__ if isinstance(p.annotation, typing._UnionGenericAlias) else p.annotation):
-                kwargs[p.name] = msg.instruct_content
+            elif msg.data and isinstance(msg.data, p.annotation.__args__ if isinstance(p.annotation, typing._UnionGenericAlias) else p.annotation):
+                kwargs[p.name] = msg.data
                 msg.processed_by.add(self)
                 break
             if p.name not in kwargs:
@@ -162,7 +162,7 @@ class Role:
 
     def can_handle(self, message: Message) -> bool:
         """Check if the role can handle the message."""
-        context_class = message.instruct_content.__class__ if message.instruct_content else type(message.content)
+        context_class = message.data.__class__ if message.data else type(message.content)
         if context_class in self._input_schemas:
             return True
         return False
@@ -183,7 +183,7 @@ class Role:
 
         self._event_bus.on("message", on_message)
         try:
-            context_class = msg.instruct_content.__class__ if msg.instruct_content else type(msg.content)
+            context_class = msg.data.__class__ if msg.data else type(msg.content)
             responses = []
             if context_class in self._input_schemas:
                 actions = self._action_index[context_class]
@@ -199,7 +199,7 @@ class Role:
                     output = Message(content=response, role=self.profile, cause_by=action, session_ids=msg.session_ids.copy())
                 else:
                     assert isinstance(response, BaseModel), f"Action must return pydantic BaseModel, but got {response}"
-                    output = Message(content=response.json(), instruct_content=response, session_ids=msg.session_ids.copy(),
+                    output = Message(content=response.json(), data=response, session_ids=msg.session_ids.copy(),
                                 role=self.profile, cause_by=action)
                 # self._rc.memory.add(output)
                 # logger.debug(f"{response}")

@@ -244,7 +244,7 @@ async def main():
     pr = SoftwareRequirement.parse_obj(mock_software_requirements)
     req = Message(
         content=pr.json(),
-        instruct_content=pr,
+        data=pr,
         role="Project Manager",
     )
 

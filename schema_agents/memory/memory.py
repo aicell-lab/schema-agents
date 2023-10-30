@@ -47,9 +47,9 @@ class Memory:
         ret = []
         for schema in schemas:
             if schema is str:
-                ret += [message for message in self.storage if not message.instruct_content and isinstance(message.content, str)]
+                ret += [message for message in self.storage if not message.data and isinstance(message.content, str)]
             else:
-                ret += [message for message in self.storage if message.instruct_content and isinstance(message.instruct_content, schema)]
+                ret += [message for message in self.storage if message.data and isinstance(message.data, schema)]
         return ret
 
     def delete(self, message: Message):

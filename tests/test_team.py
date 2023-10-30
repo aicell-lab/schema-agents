@@ -44,7 +44,7 @@ async def test_team():
     event_bus = team.get_event_bus()
     event_bus.register_default_events()
     responses = await team.handle(Message(role="Bot", content="Create a segmentation software"))
-    assert isinstance(responses[1].instruct_content, SoftwareRequirementDocument)
-    assert isinstance(responses[2].instruct_content, AnalysisScript)
+    assert isinstance(responses[1].data, SoftwareRequirementDocument)
+    assert isinstance(responses[2].data, AnalysisScript)
     
     
