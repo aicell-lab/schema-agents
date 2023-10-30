@@ -5,9 +5,8 @@ from pydantic import BaseModel, Field
 from schema_agents.role import Role
 from schema_agents.schema import Message
 from schema_agents.tools.code_interpreter import create_mock_client
-from schema_agents.memory.long_term_memory import LongTermMemory
-
-
+from schema_agents.utils.common import EventBus
+from schema_agents.logs import logger
 class MicroscopeControlRequirements(BaseModel):
     """Requirements for controlling the microscope and acquire images."""
     path: str = Field(default="", description="save images path")
@@ -67,50 +66,45 @@ def create_microscopist(client=None):
     if not client:
         client = create_mock_client()
     microscope = Microscope(client)
-    Microscopist = Role.create(
+    microscopist = Role(
         name="Thomas",
         profile="Microscopist",
         goal="Acquire images from the microscope based on user's requests.",
         constraints=None,
         actions=[microscope.multi_dimensional_acquisition],
     )
-    return Microscopist
+    return microscopist
 
 async def main():
     client = create_mock_client()
+    event_bus = EventBus("microscopist")
+    event_bus.register_default_events()
+
     microscope = Microscope(client)
-    Microscopist = Role.create(
+    ms = Role(
         name="Thomas",
         profile="Microscopist",
         goal="Acquire images from the microscope based on user's requests.",
         constraints=None,
         actions=[microscope.plan, microscope.multi_dimensional_acquisition],
+        event_bus=event_bus
     )
-    ms = Microscopist()
-    ms.recv(Message(content="acquire image every 2nm along x, y in a 2x2um square, gradually increase exposure time from 0.1 to 2.0s", role="User"))
-    resp = await ms._react()
-    print(resp)
-    for res in resp:
-        ms.recv(res)
-        resp = await ms._react()
-        print(resp)
 
-    ms.recv(Message(content="acquire an image and save to /tmp/img.png", role="User"))
-    resp = await ms._react()
-    print(resp)
-    for res in resp:
-        ms.recv(res)
-        resp = await ms._react()
-        print(resp)
+    messages = await ms.handle(Message(content="acquire an image and save to /tmp/img.png", role="User"))
+    assert len(messages) == 2
+    assert isinstance(messages[-1].instruct_content, ExecutionResult)
+    assert messages[-1].instruct_content.status == "ok"
 
-    ms.recv(Message(content="acquire an image every 1 second for 10 seconds", role="User"))
-    resp = await ms._react()
-    print(resp)
-    for res in resp:
-        ms.recv(res)
-        resp = await ms._react()
-        print(resp)
-    
+    messages = await ms.handle(Message(content="acquire image every 2nm along x, y in a 2x2um square, gradually increase exposure time from 0.1 to 2.0s", role="User"))
+    assert len(messages) == 2
+    assert isinstance(messages[-1].instruct_content, ExecutionResult)
+    assert messages[-1].instruct_content.status == "ok"
+
+
+    messages = await ms.handle(Message(content="acquire an image every 1 second for 10 seconds", role="User"))
+    assert len(messages) == 2
+    assert isinstance(messages[-1].instruct_content, ExecutionResult)
+    assert messages[-1].instruct_content.status == "ok"
 
 if __name__ == "__main__":
     asyncio.run(main())

@@ -7,7 +7,7 @@ from schema_agents.role import Role
 from schema_agents.schema import Message
 from schema_agents.tools.code_interpreter import create_mock_client
 
-from .schemas import (PythonFunctionScript, PythonFunctionScriptChanges, Change,
+from schema_agents.teams.image_analysis_hub.schemas import (PythonFunctionScript, PythonFunctionScriptChanges, Change,
                       PythonFunctionScriptWithLineNumber, SoftwareRequirement)
 
 DEPLOY_SCRIPT = """
@@ -198,14 +198,14 @@ def create_data_engineer(client=None):
         #         print("Unable to show the React UI")
         #     return func
 
-    DataEngineer = Role.create(
+    data_engineer = Role(
         name="Alice",
         profile="Data Engineer",
         goal="Develop the python function script according to the software requirement, ensuring that it fulfills the desired functionality. Implement necessary algorithms, handle data processing, and write tests to validate the correctness of the function.",
         constraints=None,
         actions=[develop_python_functions],
     )
-    return DataEngineer
+    return data_engineer
 
 
 async def main():
@@ -238,7 +238,7 @@ async def main():
         "additional_notes": "The cells are U2OS cells in a IF microscopy image. The cells are round and in green color, the background is black. The number of cells in the image should be more than 12.",
     }
 
-    DataEngineer = create_data_engineer("test-service", client=create_mock_client())
+    DataEngineer = create_data_engineer(client=create_mock_client())
     ds = DataEngineer()
 
     pr = SoftwareRequirement.parse_obj(mock_software_requirements)
@@ -248,9 +248,10 @@ async def main():
         role="Project Manager",
     )
 
-    ds.recv(req)
-    ds_script = await ds._react()
-    print(ds_script)
+    event_bus = ds.get_event_bus()
+    event_bus.register_default_events()
+    messages = await ds.handle(req)
+    print(messages)
 
 
 if __name__ == "__main__":

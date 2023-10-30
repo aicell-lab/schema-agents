@@ -57,12 +57,12 @@ async def test_schema_user():
     def get_user_response(config: FormDialogInfo) -> UserClarification:
         """Get user response."""
         return UserClarification(content=str({"anwser": "I don't know"}))
-    User = Role.create(name="Bob",
+    user = Role(name="Bob",
         profile="User",
         goal="Provide the use case and requirements for the development, the aim is to create a cell counting software for U2OS cells under confocal microscope, I would like to use web interface in Imjoy.",
         constraints=None,
         actions=[get_user_response])
-    user = User()
+    user.get_event_bus().register_default_events()
     # create a form_schema for get user name
     form_schema = json.dumps({"title": "Get User Name", "type": "object", "properties": {"name": {"type": "string"}}})
     form_dialog = FormDialogInfo(form_schema=form_schema)
@@ -83,24 +83,23 @@ async def test_schema_str_input():
         else:
             raise TypeError(f"response must be SoftwareRequirementDocument or GetExtraInformation, but got {type(response)}")
 
-    BioImageAnalyst = Role.create(name="Alice",
+    bioimage_analyst = Role(name="Alice",
                 profile="BioImage Analyst",
                 goal="Efficiently communicate with the user and translate the user's needs into software requirements",
                 constraints=None,
                 actions=[create_user_requirements])
-
-    bio = BioImageAnalyst()
-    responses = await bio.handle(Message(role="Bot", content="Create a segmentation software"))
+    bioimage_analyst.get_event_bus().register_default_events()
+    responses = await bioimage_analyst.handle(Message(role="Bot", content="Create a segmentation software"))
     assert isinstance(responses[0].instruct_content, SoftwareRequirementDocument)
 
 @pytest.mark.asyncio
 async def test_schemas():
-    User = Role.create(name="Bob",
+    user = Role(name="Bob",
                 profile="User",
                 goal="Provide the use case and requirements for the development, the aim is to create a cell counting software for U2OS cells under confocal microscope, I would like to use web interface in Imjoy.",
                 constraints=None,
                 actions=[clarify, search_internet])
-    user = User()
+    user.get_event_bus().register_default_events()
     responses = await user.handle(Message(role="Bot", content="Find more information on the internet about cell counting software."))
     assert responses[0].instruct_content is None
     assert responses[0].content == "Nothing found"
@@ -118,12 +117,12 @@ async def test_schema_str():
         query = await role.aask(query, SearchInternetQuery)
         return query
 
-    User = Role.create(name="Bob",
+    user = Role(name="Bob",
                 profile="User",
                 goal="Provide the use case and requirements for the development, the aim is to create a cell counting software for U2OS cells under confocal microscope, I would like to use web interface in Imjoy.",
                 constraints=None,
                 actions=[process_user_input])
-    user = User()
+    user.get_event_bus().register_default_events()
     instruct = GetExtraInformation(content="Tell me the use case in 1 sentence.", summary="Requesting details about the use case")
     responses = await user.handle(Message(role="Bot", content=instruct.json(), instruct_content=instruct))
     assert isinstance(responses[0].instruct_content, SearchInternetQuery)
