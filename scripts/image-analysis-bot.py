@@ -48,8 +48,7 @@ async def chat(msg, client, context=None):
     event_bus = hub.get_event_bus()
     event_bus.register_default_events()
     event_bus.on("message", message_callback)
-    hub.start(msg.text)
-    await hub.run(n_round=10)
+    await hub.handle(msg.text)
 
 async def test_chat():
     client = create_mock_client(form_data={

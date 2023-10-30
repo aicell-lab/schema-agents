@@ -168,7 +168,10 @@ class Role:
         return False
     
     # @retry(stop=stop_after_attempt(2), wait=wait_fixed(1))
-    async def handle(self, msg: Message) -> list[Message]:
+    async def handle(self, msg: Union[str, Message]) -> list[Message]:
+        """Handle message"""
+        if isinstance(msg, str):
+            msg = Message(role="User", content=msg)
         if not self.can_handle(msg):
             raise ValueError(f"Invalid message, the role {self._setting} cannot handle the message: {msg}")
         session_id = str(uuid.uuid4())
