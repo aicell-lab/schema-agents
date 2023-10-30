@@ -19,9 +19,10 @@ class Team(Role):
     Team: Possesses a team, SOP (Standard Operating Procedures), and a platform for instant messaging,
     dedicated to writing executable code.
     """
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, investment=10, **kwargs):
         super().__init__(*args, **kwargs)
-        self.investment: float = Field(default=10.0)
+        assert not kwargs.get("actions"), "Team can't have actions."
+        self._investment: float = investment
         self._roles = []
 
     def hire(self, roles: list[Role]):
@@ -37,18 +38,13 @@ class Team(Role):
 
     def invest(self, investment: float):
         """Invest team. raise NoMoneyException when exceed max_budget."""
-        self.investment = investment
-        CONFIG.max_budget = investment
-        logger.info(f'Investment: ${investment}.')
+        self._investment += investment
+        CONFIG.max_budget = self._investment
+        logger.info(f'Investment: ${self._investment}.')
 
     def _check_balance(self):
         if CONFIG.total_cost > CONFIG.max_budget:
             raise NoMoneyException(CONFIG.total_cost, f'Insufficient funds: {CONFIG.max_budget}')
-
-    def start(self, idea: Union[str, Message]):
-        """Start a project from publishing boss requirement."""
-        msg = Message(role="User", content=idea) if isinstance(idea, str) else idea
-        self._event_bus.emit("message", msg)
 
     def _save(self):
         logger.info(self.json())
@@ -76,6 +72,7 @@ class Team(Role):
 
         self._event_bus.on("message", on_message)
         try:
+            # start to process the message
             await self._event_bus.aemit("message", message)
         finally:
             self._event_bus.off("message", on_message)
