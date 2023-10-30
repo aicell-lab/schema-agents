@@ -59,7 +59,7 @@ def create_long_term_memory():
 
 
 def test_role_memory():
-    Microscopist = Role.create(
+    ms = Role(
         name="Thomas",
         profile="test_Microscopist",
         goal="Acquire images from the microscope based on user's requests.",
@@ -67,8 +67,6 @@ def test_role_memory():
         actions=[],
         long_term_memory=create_long_term_memory(),
     )
-    
-    ms = Microscopist()
 
     query = 'get microscope related functions'
     resp = ms.long_term_memory.retrieve(query, filter={"category": "error"})

@@ -9,6 +9,8 @@
 import os
 import subprocess
 import tempfile
+import re
+import json
 
 from pydantic import BaseModel
 from schema_agents.utils.singleton import Singleton
