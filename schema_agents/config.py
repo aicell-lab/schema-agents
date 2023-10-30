@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-提供配置，单例
+Provide a configuration object that can be used to access the configuration
 """
 import os
 import openai

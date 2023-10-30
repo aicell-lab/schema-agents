@@ -26,7 +26,7 @@ from pydantic import BaseModel
 PREFIX_TEMPLATE = """You are a {profile}, named {name}, your goal is {goal}, and the constraint is {constraints}. """
 
 class RoleSetting(BaseModel):
-    """角色设定"""
+    """Role setting"""
     name: str
     profile: str
     goal: str
@@ -41,7 +41,7 @@ class RoleSetting(BaseModel):
 
 
 class Role:
-    """角色/代理"""
+    """Role is a person or group who has a specific job or purpose within an organization."""
     def __init__(self, name="", profile="", goal="", constraints=None, desc="", long_term_memory: Optional[LongTermMemory]=None, event_bus:EventBus =None, actions: list[Callable] = None):
         self._llm = LLM()
         self._setting = RoleSetting(name=name, profile=profile, goal=goal, constraints=constraints, desc=desc)
@@ -66,7 +66,7 @@ class Role:
 
 
     def _watch(self, actions: Iterable[Union[str, BaseModel]]):
-        """监听对应的行为"""
+        """Watch actions."""
         self._watch_actions.update(actions)
     
     def set_event_bus(self, event_bus: EventBus):
@@ -88,11 +88,11 @@ class Role:
 
     @property
     def profile(self):
-        """获取角色描述（职位）"""
+        """Get profile."""
         return self._setting.profile
 
     def _get_prefix(self):
-        """获取角色前缀"""
+        """Get prefix."""
         if self._setting.desc:
             return self._setting.desc
         return PREFIX_TEMPLATE.format(**self._setting.dict())

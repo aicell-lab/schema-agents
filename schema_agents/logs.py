@@ -14,7 +14,7 @@ from schema_agents.const import PROJECT_ROOT
 
 
 def define_log_level(print_level="INFO", logfile_level="DEBUG"):
-    """调整日志级别到level之上"""
+    """Define log level."""
     _logger.remove()
     _logger.add(sys.stderr, level=print_level)
     _logger.add(PROJECT_ROOT / 'logs/log.txt', level=logfile_level)
