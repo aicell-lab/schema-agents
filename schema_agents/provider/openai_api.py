@@ -7,6 +7,8 @@
 """
 import asyncio
 import time
+import random
+import string
 from functools import wraps
 from typing import NamedTuple, Union, List, Dict, Any
 
@@ -21,6 +23,7 @@ from schema_agents.utils.token_counter import (
     count_message_tokens,
     count_string_tokens,
 )
+from schema_agents.utils.common import EventBus
 
 
 def retry(max_retries):
@@ -147,7 +150,7 @@ class OpenAIGPTAPI(BaseGPTAPI, RateLimiter):
             openai.api_version = config.openai_api_version
         self.rpm = int(config.get("RPM", 10))
 
-    async def _achat_completion_stream(self, messages: list[dict], **kwargs) -> str:
+    async def _achat_completion_stream(self, messages: list[dict], event_bus: EventBus=None, **kwargs) -> str:
         response = await openai.ChatCompletion.acreate(
             **self._cons_kwargs(messages),
             stream=True,
@@ -159,6 +162,8 @@ class OpenAIGPTAPI(BaseGPTAPI, RateLimiter):
         collected_messages = []
         function_call_detected = False
         func_call = {}
+        sid = ''.join(random.choices(string.ascii_lowercase + string.digits, k=8))
+        
         # iterate through the stream of events
         async for chunk in response:
             collected_chunks.append(chunk)  # save the event response
@@ -168,25 +173,29 @@ class OpenAIGPTAPI(BaseGPTAPI, RateLimiter):
             if "function_call" in chunk_message:
                 if "name" in chunk_message["function_call"]:
                     func_call["name"] = chunk_message["function_call"]["name"]
-                    if not function_call_detected:
-                        print(func_call["name"] + "(", end="")
+                    # if not function_call_detected:
+                    #     print(func_call["name"] + "(", end="")
                 if "arguments" in chunk_message["function_call"]:
                     if "arguments" not in func_call:
                         func_call["arguments"] = ""
                     func_call["arguments"] += chunk_message["function_call"]["arguments"]
-                    print(chunk_message["function_call"]["arguments"], end="")
+                    # print(chunk_message["function_call"]["arguments"], end="")
                 function_call_detected = True
-            # if (
-            #     function_call_detected
-            #     and chunk["choices"][0].get("finish_reason") in ["function_call", "stop"]
-            # ):
-                # print(f"\nFunction request completed: ", func_call)
-                
-            if not function_call_detected and "content" in chunk_message:
-                print(chunk_message["content"], end="")
-        if function_call_detected:
-            print(")", end="")
-        print()
+            if event_bus:
+                if function_call_detected:
+                    if "function_call" in chunk_message and "name" in chunk_message["function_call"]:
+                        event_bus.emit("stream", {"sid": sid, "type": "function_call", "name": func_call["name"], "arguments": func_call["arguments"], "status": "start"})
+                    elif chunk["choices"][0].get("finish_reason") in ["function_call", "stop"]:
+                        event_bus.emit("function_call", func_call)
+                        event_bus.emit("stream", {"sid": sid, "type": "function_call", "name": func_call["name"], "arguments": func_call["arguments"], "status": "finished"})
+                    elif  "function_call" in chunk_message and "arguments" in chunk_message["function_call"]:
+                        event_bus.emit("stream", {"sid": sid, "type": "function_call", "name": func_call["name"], "arguments": chunk_message["function_call"]["arguments"], "status": "in_progress"})
+                elif "content" in chunk_message and chunk_message["content"]:
+                    event_bus.emit("stream", {"sid": sid, "type": "text", "content": chunk_message["content"]})
+
+        # if function_call_detected:
+        #     print(")", end="")
+        # print()
         
         if function_call_detected:
             full_reply_content = func_call
@@ -196,6 +205,8 @@ class OpenAIGPTAPI(BaseGPTAPI, RateLimiter):
             full_reply_content = ''.join([m.get('content', '') for m in collected_messages])
             usage = self._calc_usage(messages, full_reply_content)
         self._update_costs(usage)
+        if event_bus:
+            event_bus.emit("completion", full_reply_content)
         return full_reply_content
 
 
@@ -220,38 +231,45 @@ class OpenAIGPTAPI(BaseGPTAPI, RateLimiter):
             }
         return kwargs
 
-    async def _achat_completion(self, messages: list[dict], **kwargs) -> dict:
+    async def _achat_completion(self, messages: list[dict], event_bus: EventBus=None, **kwargs) -> dict:
         kwargs.update(self._cons_kwargs(messages))
         rsp = await self.llm.ChatCompletion.acreate(**kwargs)
         self._update_costs(rsp.get('usage'))
+        if event_bus:
+            event_bus.emit("completion", rsp)
         return rsp
 
-    def _chat_completion(self, messages: list[dict]) -> dict:
+    def _chat_completion(self, messages: list[dict], event_bus: EventBus=None) -> dict:
         rsp = self.llm.ChatCompletion.create(**self._cons_kwargs(messages))
         self._update_costs(rsp)
+        if event_bus:
+            event_bus.emit("completion", rsp)
         return rsp
 
-    def completion(self, messages: list[dict]) -> dict:
+    def completion(self, messages: list[dict], event_bus: EventBus=None) -> dict:
         # if isinstance(messages[0], Message):
         #     messages = self.messages_to_dict(messages)
-        return self._chat_completion(messages)
+        rsp = self._chat_completion(messages, event_bus=event_bus)
+        return rsp
 
-    async def acompletion(self, messages: list[dict]) -> dict:
+    async def acompletion(self, messages: list[dict], event_bus: EventBus=None) -> dict:
         # if isinstance(messages[0], Message):
         #     messages = self.messages_to_dict(messages)
-        return await self._achat_completion_stream(messages)
+        rsp = await self._achat_completion_stream(messages, event_bus=event_bus)
+        return rsp
     
-    async def acompletion_function(self, messages: list[dict], functions: List[Dict[str, Any]]=None, function_call: Union[str, Dict[str, str]]=None) -> dict:
+    async def acompletion_function(self, messages: list[dict], functions: List[Dict[str, Any]]=None, function_call: Union[str, Dict[str, str]]=None, event_bus: EventBus=None) -> dict:
         # if isinstance(messages[0], Message):
         #     messages = self.messages_to_dict(messages)
-        return await self._achat_completion_stream(messages, functions=functions, function_call=function_call)
+        rsp = await self._achat_completion_stream(messages, functions=functions, function_call=function_call, event_bus=event_bus)
+        return rsp
 
     @retry(max_retries=6)
-    async def acompletion_text(self, messages: list[dict], stream=False) -> str:
+    async def acompletion_text(self, messages: list[dict], stream=False, event_bus: EventBus=None) -> str:
         """when streaming, print each token in place."""
         if stream:
-            return await self._achat_completion_stream(messages)
-        rsp = await self._achat_completion(messages)
+            return await self._achat_completion_stream(messages, event_bus=event_bus)
+        rsp = await self._achat_completion(messages, event_bus=event_bus)
         return self.get_choice_text(rsp)
 
     def _calc_usage(self, messages: list[dict], rsp: str) -> dict:
@@ -262,7 +280,7 @@ class OpenAIGPTAPI(BaseGPTAPI, RateLimiter):
         usage['completion_tokens'] = completion_tokens
         return usage
 
-    async def acompletion_batch(self, batch: list[list[dict]]) -> list[dict]:
+    async def acompletion_batch(self, batch: list[list[dict]], event_bus: EventBus=None) -> list[dict]:
         """返回完整JSON"""
         split_batches = self.split_batches(batch)
         all_results = []
@@ -271,16 +289,16 @@ class OpenAIGPTAPI(BaseGPTAPI, RateLimiter):
             logger.info(small_batch)
             await self.wait_if_needed(len(small_batch))
 
-            future = [self.acompletion(prompt) for prompt in small_batch]
+            future = [self.acompletion(prompt, event_bus=event_bus) for prompt in small_batch]
             results = await asyncio.gather(*future)
             logger.info(results)
             all_results.extend(results)
 
         return all_results
 
-    async def acompletion_batch_text(self, batch: list[list[dict]]) -> list[str]:
+    async def acompletion_batch_text(self, batch: list[list[dict]], event_bus: EventBus=None) -> list[str]:
         """仅返回纯文本"""
-        raw_results = await self.acompletion_batch(batch)
+        raw_results = await self.acompletion_batch(batch, event_bus=event_bus)
         results = []
         for idx, raw_result in enumerate(raw_results, start=1):
             result = self.get_choice_text(raw_result)

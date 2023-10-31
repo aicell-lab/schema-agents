@@ -9,15 +9,19 @@
 import os
 import subprocess
 import tempfile
+import re
+import json
 
-from schema_agents.utils.read_document import read_docx
+from pydantic import BaseModel
 from schema_agents.utils.singleton import Singleton
 from schema_agents.utils.token_counter import (
     TOKEN_COSTS,
     count_message_tokens,
     count_string_tokens,
 )
-
+from schema_agents.utils.common import (
+    EventBus,
+)
 
 
 def convert_key_name(key_name):
@@ -64,3 +68,68 @@ def apply_patch(original_text, patch_text):
         raise RuntimeError(f"Failed to apply patch: {result.stdout and result.stdout.decode()}\n{result.stderr and result.stderr.decode()}")
     else:
         return patched_text
+
+
+def parse_special_json(json_string):
+    # Regex pattern to find string values enclosed in double quotes or backticks, considering escaped quotes
+    pattern = r'"(?:[^"\\]|\\.)*"|`[^`]*`'
+    # Extract all matches and store them in a list
+    code_blocks = re.findall(pattern, json_string)
+
+    mapping = {}
+    # Replace each match in the JSON string with a special placeholder
+    for i, block in enumerate(code_blocks):
+        json_string = json_string.replace(f'{block}', f'"###CODE-BLOCK-PLACEHOLDER-{i}###"')
+        mapping[f'###CODE-BLOCK-PLACEHOLDER-{i}###'] = block[1:-1].encode('utf-8').decode('unicode_escape')
+
+    # Parse the JSON string into a Python dictionary
+    data = json.loads(json_string)
+    
+    def restore_codeblock(data):
+        if isinstance(data, str):
+            if re.match(r'###CODE-BLOCK-PLACEHOLDER-\d+###', data):
+                return mapping[data]
+            else:
+                return data
+        if isinstance(data, (int, float, bool)) or data is None:
+            return data
+        # Replace each placeholder with the corresponding code block
+        if isinstance(data, list):
+            cdata = []
+            for d in data:
+                cdata.append(restore_codeblock(d))
+            return cdata
+
+        assert isinstance(data, dict)
+        cdata = {}
+        for key in list(data.keys()):
+            value = data[key]
+            value = restore_codeblock(value)
+            key = restore_codeblock(key)
+            cdata[key] = value
+        return cdata
+    
+    return restore_codeblock(data)
+
+# https://stackoverflow.com/a/58938747
+def remove_a_key(d, remove_key):
+    if isinstance(d, dict):
+        for key in list(d.keys()):
+            if key == remove_key:
+                del d[key]
+            else:
+                remove_a_key(d[key], remove_key)
+
+def schema_to_function(schema: BaseModel):
+    assert schema.__doc__, f"{schema.__name__} is missing a docstring."
+    assert (
+        "title" not in schema.__fields__.keys()
+    ), "`title` is a reserved keyword and cannot be used as a field name."
+    schema_dict = schema.schema()
+    remove_a_key(schema_dict, "title")
+
+    return {
+        "name": schema.__name__,
+        "description": schema.__doc__,
+        "parameters": schema_dict,
+    }

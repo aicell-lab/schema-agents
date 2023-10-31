@@ -223,7 +223,7 @@ def create_data_engineer(client=None):
         #         print("Unable to show the React UI")
         #     return func
 
-    DataEngineer = Role.create(
+    data_engineer = Role(
         name="Alice",
         profile="Data Engineer",
         goal="Develop the python function script according to the software requirement, ensuring that it fulfills the desired functionality. Implement necessary algorithms, handle data processing, and write tests to validate the correctness of the function.",
@@ -231,7 +231,7 @@ def create_data_engineer(client=None):
         actions=[develop_python_functions],
         long_term_memory=create_long_term_memory(),
     )
-    return DataEngineer
+    return data_engineer
 
 
 async def main():
@@ -270,13 +270,14 @@ async def main():
     pr = SoftwareRequirement.parse_obj(mock_software_requirements)
     req = Message(
         content=pr.json(),
-        instruct_content=pr,
+        data=pr,
         role="Project Manager",
     )
 
-    ds.recv(req)
-    ds_script = await ds._react()
-    print(ds_script)
+    event_bus = ds.get_event_bus()
+    event_bus.register_default_events()
+    messages = await ds.handle(req)
+    print(messages)
 
 
 if __name__ == "__main__":

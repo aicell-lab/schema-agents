@@ -5,7 +5,6 @@ from schema_agents.hyphaichat import HyphaAIChat
 from schema_agents.tools.code_interpreter import CodeInterpreter
 from pydantic import BaseModel
 from simpleaichat.utils import fd
-from typing import Any, Dict, List, Optional, Union
 
 params = {"temperature": 0.0, "max_tokens": 1000}
 

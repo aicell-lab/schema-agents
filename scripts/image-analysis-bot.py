@@ -4,10 +4,11 @@ import os
 import uuid
 import asyncio
 from functools import partial
+from pydantic import BaseModel
 from imjoy_rpc.hypha import connect_to_server, login
 from schema_agents.utils import dict_to_md
 from schema_agents.config import CONFIG
-from schema_agents.teams.image_analysis_hub import ImageAnalysisHub
+from schema_agents.teams.image_analysis_hub import create_image_analysis_hub
 import logging
 from schema_agents.tools.code_interpreter import create_mock_client
 logging.basicConfig(level=logging.DEBUG)
@@ -34,19 +35,20 @@ async def chat(msg, client, context=None):
         })
 
     async def message_callback(message):
-        if message.instruct_content:
-            content = dict_to_md(message.instruct_content.dict())
+        if message.data:
+            content = dict_to_md(message.data.dict())
         else:
             content = message.content
         text = f"# 🧑{message.role}\n\n{content}\n **💰{CONFIG.total_cost:.4f} / {CONFIG.max_budget:.4f}**\n"
         if client:
             await client.appendText({"messageId": msg.messageId, "text": text})
     
-    hub = ImageAnalysisHub()
-    hub.invest(0.5)
-    hub.recruit(client)
-    hub.start(msg.text, message_callback=message_callback)
-    await hub.run(n_round=10)
+
+    hub = create_image_analysis_hub(client=client, investment=0.5)
+    event_bus = hub.get_event_bus()
+    event_bus.register_default_events()
+    event_bus.on("message", message_callback)
+    await hub.handle(msg.text)
 
 async def test_chat():
     client = create_mock_client(form_data={
@@ -63,9 +65,14 @@ async def test_microscope():
         "path": "./images",
         "exposure": 0.1,
     })
-  
-    await chat("acquire an image every 1 second for 3.5 seconds", client, {"user": {"id": "github|478667"}})
-
+    class Message(BaseModel):
+        messageId: str
+        text: str
+    
+    await chat(Message(text="acquire an image every 1 second for 3.5 seconds", messageId="123"), client, {"user": {"id": "github|478667"}})
+    loop = asyncio.get_event_loop()
+    loop.stop()
+    
 async def main():
     client_id = str(uuid.uuid3(uuid.NAMESPACE_DNS, f'urn:node:{hex(uuid.getnode())}'))
     # token = login({"server_url": SERVER_URL})
@@ -119,5 +126,5 @@ async def main():
 
 if __name__ == "__main__":
     loop = asyncio.get_event_loop()
-    loop.create_task(main())
+    loop.create_task(test_microscope())
     loop.run_forever()

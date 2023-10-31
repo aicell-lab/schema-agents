@@ -70,40 +70,36 @@ async def deploy_app(ui: ReactUI, role: Role):
     # serve_plugin(ui)
     print("Deploying the app...")
 
-class ImageAnalysisHub(Team):
-    """
-    ImageAnalysisHub: a team of roles to create software for image analysis.
-    """
-    def recruit(self, client):
-        """recruit roles to cooperate"""
-        UXManager = Role.create(name="Luisa",
-            profile="UX Manager",
-            goal="Focus on understanding the user's needs and experience. Understand the user needs by interacting with user and communicate these findings to the project manager by calling `UserRequirements`.",
-            constraints=None,
-            actions=[partial(clarify_user_request, client), create_user_requirements])
 
-        ProjectManager = Role.create(name="Alice",
-                    profile="Project Manager",
-                    goal="Efficiently communicate with the user and translate the user's needs into software requirements",
-                    constraints=None,
-                    actions=[create_software_requirements])
+def create_hpa_database_explorer(client, investment):
+    """recruit roles to cooperate"""
+    team = Team(name="HPA Database Explorer", profile="A team of roles to create software for image analysis.", goal="Create a software for image analysis.", investment=investment)
+    ux_manager = Role(name="Luisa",
+        profile="UX Manager",
+        goal="Focus on understanding the user's needs and experience. Understand the user needs by interacting with user and communicate these findings to the project manager by calling `UserRequirements`.",
+        constraints=None,
+        actions=[partial(clarify_user_request, client), create_user_requirements])
 
-        WebDeveloper  = create_web_developer(client=client)
-        DataEngineer = create_data_engineer(client=client)
-        DevOps = Role.create(name="Bruce",
-                    profile="DevOps",
-                    goal="Deploy the software to the cloud and make it available to the user.",
-                    constraints=None,
-                    actions=[deploy_app])  
-        self.environment.add_roles([UXManager(), ProjectManager(), DataEngineer(), WebDeveloper(), DevOps()]) 
+    project_manager = Role(name="Alice",
+                profile="Project Manager",
+                goal="Efficiently communicate with the user and translate the user's needs into software requirements",
+                constraints=None,
+                actions=[create_software_requirements])
 
+    web_developer  = create_web_developer(client=client)
+    data_engineer = create_data_engineer(client=client)
+    devops = Role(name="Bruce",
+                profile="DevOps",
+                goal="Deploy the software to the cloud and make it available to the user.",
+                constraints=None,
+                actions=[deploy_app])  
+
+    team.hire([ux_manager, project_manager, web_developer, data_engineer, web_developer, devops])
+    return team
 
 async def test():
-    lab = ImageAnalysisHub()
-    lab.invest(0.5)
-    lab.recruit(client=create_mock_client())
-    lab.start("create a cell counting software")
-    await lab.run(n_round=10)
+    lab = create_hpa_database_explorer(client=create_mock_client())
+    await lab.handle("create a cell counting software")
 
 if __name__ == "__main__":
     asyncio.run(test())

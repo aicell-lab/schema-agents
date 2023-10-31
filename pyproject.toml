@@ -3,9 +3,9 @@ requires = ["setuptools", "wheel"]
 
 [project]
 name = "schema-agents"
-version = "0.1.0"
+version = "0.1.8"
+readme = "README.md"
 description = "A schema-based LLM framework for building multi-agent collaborative systems."
-license = {text = "MIT"}
 dependencies = [
     "numpy>=1.21.2",
     "jsonschema>=4.0.1",
@@ -13,13 +13,10 @@ dependencies = [
     "pydantic<2,>=1.8.2",
     "openai>=0.27.0",
     "loguru",
-    "docx",
     "jupyter-client",
     "faiss-cpu",
     "pyyaml",
-    "python-docx",
     "tiktoken",
-    "anthropic",
     "tenacity",
     "langchain",
 ]

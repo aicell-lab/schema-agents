@@ -6,10 +6,9 @@
 @File    : memory.py
 """
 from collections import defaultdict, OrderedDict
-from typing import Iterable, Type
+from typing import Iterable, Callable
 from pydantic import BaseModel
 
-from schema_agents.action import Action
 from schema_agents.schema import Message
 
 
@@ -19,7 +18,7 @@ class Memory:
     def __init__(self):
         """Initialize an empty storage list and an empty index dictionary"""
         self.storage: list[Message] = []
-        self.index: OrderedDict[Type[Action], list[Message]] = OrderedDict()
+        self.index: OrderedDict[Callable, list[Message]] = OrderedDict()
 
     def add(self, message: Message):
         """Add a new message to storage, while updating the index"""
@@ -48,9 +47,9 @@ class Memory:
         ret = []
         for schema in schemas:
             if schema is str:
-                ret += [message for message in self.storage if not message.instruct_content and isinstance(message.content, str)]
+                ret += [message for message in self.storage if not message.data and isinstance(message.content, str)]
             else:
-                ret += [message for message in self.storage if message.instruct_content and isinstance(message.instruct_content, schema)]
+                ret += [message for message in self.storage if message.data and isinstance(message.data, schema)]
         return ret
 
     def delete(self, message: Message):
@@ -86,11 +85,11 @@ class Memory:
             news.append(i)
         return news
 
-    def get_by_action(self, action: Type[Action]) -> list[Message]:
+    def get_by_action(self, action: Callable) -> list[Message]:
         """Return all messages triggered by a specified Action"""
         return self.index[action]
 
-    def get_by_actions(self, actions: Iterable[Type[Action]]) -> list[Message]:
+    def get_by_actions(self, actions: Iterable[Callable]) -> list[Message]:
         """Return all messages triggered by specified Actions"""
         rsp = []
         for key in self.index.keys():

@@ -4,7 +4,7 @@ from schema_agents.role import Role
 from schema_agents.schema import Message
 from schema_agents.tools.code_interpreter import create_mock_client
 
-from .schemas import ReactUI, SoftwareRequirement
+from schema_agents.teams.image_analysis_hub.schemas import ReactUI, SoftwareRequirement
 
 def create_web_developer(client=None):
 
@@ -18,12 +18,12 @@ def create_web_developer(client=None):
             )
         return plugin
 
-    WebDeveloper = Role.create(name="Bob",
+    web_developer = Role(name="Bob",
                                     profile="Web Developer",
                                     goal="Develop the React UI plugin according to the software requirement, ensuring that it fulfills the desired functionality. Implement necessary algorithms, handle data processing, and write tests to validate the correctness of the function.",
                                     constraints=None,
                                     actions=[develop_react_ui])
-    return WebDeveloper
+    return web_developer
 
 def serve_plugin(plugin: ReactUI):
     import uvicorn
@@ -130,12 +130,11 @@ async def main(context=None):
     WebDeveloper = create_web_developer(client=create_mock_client())
     wd = WebDeveloper()
     pr = SoftwareRequirement.parse_obj(mock_software_requirements)
-    req = Message(content=pr.json(), instruct_content=pr, role="Project Manager")
-    wd.recv(req)
-    resp = await wd._react()
+    req = Message(content=pr.json(), data=pr, role="Project Manager")
+    resp = await wd.handle(req)
     print(resp)
     if context is not None:
-        context['plugin'] = resp[0].instruct_content
+        context['plugin'] = resp[0].data
     
 
 if __name__ == "__main__":

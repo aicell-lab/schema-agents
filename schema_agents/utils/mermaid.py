@@ -100,5 +100,5 @@ MMC2 = """sequenceDiagram
 
 if __name__ == '__main__':
     # logger.info(print_members(print_members))
-    mermaid_to_file(MMC1, PROJECT_ROOT / 'tmp/1.png')
-    mermaid_to_file(MMC2, PROJECT_ROOT / 'tmp/2.png')
+    mermaid_to_file(MMC1, '/tmp/1.png')
+    mermaid_to_file(MMC2, '/tmp/2.png')

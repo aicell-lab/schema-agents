@@ -107,16 +107,6 @@ class CodeInterpreter:
         assert results['status'] == "ok", f"failed to get kernel info, output: {results}"
         kernel_info = extract_stdout(results).replace('\n', ' ')
         self.system_prompt = SYSTEM_PROMPT.format(work_dir=self.work_dir, kernel_info=kernel_info)
-        self.ai_config = dict(
-            model="gpt-3.5-turbo", 
-            system=self.system_prompt + FORMAT_INSTRUCTION, 
-            params={"temperature": 0.0,"max_tokens": 1000,}
-        )
-
-        # self.bot = AIChat(
-        #     id=self.MAIN_SESSION_ID,
-        #     **self.ai_config
-        # )
 
     def reset(self):
         self.tearDown()

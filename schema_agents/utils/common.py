@@ -9,6 +9,8 @@ import ast
 import inspect
 import os
 import re
+import asyncio
+import uuid
 from typing import List, Tuple
 
 from schema_agents.logs import logger
@@ -230,3 +232,81 @@ def print_members(module, indent=0):
             print(f'{prefix}Function: {name}')
         elif inspect.ismethod(obj):
             print(f'{prefix}Method: {name}')
+
+class EventBus:
+    """An event bus class."""
+
+    def __init__(self, name, logger=None):
+        """Initialize the event bus."""
+        self._callbacks = {}
+        self._logger = logger
+        self.name = name
+
+    def on(self, event_name, func):
+        """Register an event callback."""
+        self._callbacks[event_name] = self._callbacks.get(event_name, []) + [func]
+        return func
+
+    def once(self, event_name, func):
+        """Register an event callback that only run once."""
+        self._callbacks[event_name] = self._callbacks.get(event_name, []) + [func]
+        # mark once callback
+        self._callbacks[event_name].once = True
+        return func
+
+    async def aemit(self, event_name, *data):
+        """Trigger an event."""
+        futures = []
+        for func in self._callbacks.get(event_name, []):
+            try:
+                if inspect.iscoroutinefunction(func):
+                    futures.append(func(*data))
+                else:
+                    func(*data)
+                if hasattr(func, "once"):
+                    self.off(event_name, func)
+            except Exception as e:
+                if self._logger:
+                    self._logger.error(
+                        "Error in event callback: %s, %s, error: %s",
+                        event_name,
+                        func,
+                        e,
+                    )
+        await asyncio.gather(*futures)
+
+    def emit(self, event_name, *data):
+        """Trigger an event."""
+        for func in self._callbacks.get(event_name, []):
+            try:
+                if inspect.iscoroutinefunction(func):
+                    asyncio.get_running_loop().create_task(func(*data))
+                else:
+                    func(*data)
+                if hasattr(func, "once"):
+                    self.off(event_name, func)
+            except Exception as e:
+                if self._logger:
+                    self._logger.error(
+                        "Error in event callback: %s, %s, error: %s",
+                        event_name,
+                        func,
+                        e,
+                    )
+
+    def off(self, event_name, func=None):
+        """Remove an event callback."""
+        if not func:
+            del self._callbacks[event_name]
+        else:
+            self._callbacks.get(event_name, []).remove(func)
+
+    def register_default_events(self):
+        async def stream_callback(message):
+            if message["type"] == "function_call":
+                if message["status"] == "in_progress":
+                    print(message["arguments"], end="")
+                else:
+                    print(f'\nGenerating {message["name"]} ({message["status"]}): {message["arguments"]}')
+
+        self.on("stream", stream_callback)
