@@ -139,6 +139,7 @@ class OpenAIGPTAPI(BaseGPTAPI, RateLimiter):
         self.__init_openai(CONFIG)
         self.llm = openai
         self.model = openai_api_model or CONFIG.openai_api_model
+        self.auto_max_tokens = False
         self._cost_manager = CostManager()
         RateLimiter.__init__(self, rpm=self.rpm)
         logger.info(f"OpenAI API model: {self.model}")
@@ -154,7 +155,7 @@ class OpenAIGPTAPI(BaseGPTAPI, RateLimiter):
 
     async def _achat_completion_stream(self, messages: list[dict], event_bus: EventBus=None, **kwargs) -> str:
         response = await openai.ChatCompletion.acreate(
-            **self._cons_kwargs(messages),
+            **self._cons_kwargs(messages, functions=kwargs.get("functions")),
             stream=True,
             **kwargs
         )
@@ -202,39 +203,42 @@ class OpenAIGPTAPI(BaseGPTAPI, RateLimiter):
         if function_call_detected:
             full_reply_content = func_call
             # TODO: check if the usage calculation is correct
-            usage = self._calc_usage(messages, f"{func_call['name']}({func_call['arguments']})")
+            usage = self._calc_usage(messages, f"{func_call['name']}({func_call['arguments']})", functions=kwargs.get("functions", None))
         else:
             full_reply_content = ''.join([m.get('content', '') for m in collected_messages])
-            usage = self._calc_usage(messages, full_reply_content)
+            usage = self._calc_usage(messages, full_reply_content, functions=kwargs.get("functions", None))
         self._update_costs(usage)
         if event_bus:
             event_bus.emit("completion", full_reply_content)
         return full_reply_content
 
 
-    def _cons_kwargs(self, messages: list[dict]) -> dict:
-        if CONFIG.openai_api_type == 'azure':
-            kwargs = {
-                "deployment_id": CONFIG.deployment_id,
-                "messages": messages,
-                "max_tokens": CONFIG.max_tokens_rsp,
-                "n": 1,
-                "stop": None,
-                "temperature": 0.3
-            }
+    def _cons_kwargs(self, messages: list[dict], functions: list[dict]=None) -> dict:
+        kwargs = {
+            "messages": messages,
+            "max_tokens": self.get_max_tokens(messages, functions=functions),
+            "n": 1,
+            "stop": None,
+            "temperature": 0.3,
+            "timeout": 3,
+        }
+        if CONFIG.openai_api_type == "azure":
+            if CONFIG.deployment_name and CONFIG.deployment_id:
+                raise ValueError("You can only use one of the `deployment_id` or `deployment_name` model")
+            elif not CONFIG.deployment_name and not CONFIG.deployment_id:
+                raise ValueError("You must specify `DEPLOYMENT_NAME` or `DEPLOYMENT_ID` parameter")
+            kwargs_mode = (
+                {"engine": CONFIG.deployment_name}
+                if CONFIG.deployment_name
+                else {"deployment_id": CONFIG.deployment_id}
+            )
         else:
-            kwargs = {
-                "model": self.model,
-                "messages": messages,
-                "max_tokens": CONFIG.max_tokens_rsp,
-                "n": 1,
-                "stop": None,
-                "temperature": 0.3
-            }
+            kwargs_mode = {"model": self.model}
+        kwargs.update(kwargs_mode)
         return kwargs
 
     async def _achat_completion(self, messages: list[dict], event_bus: EventBus=None, **kwargs) -> dict:
-        kwargs.update(self._cons_kwargs(messages))
+        kwargs.update(self._cons_kwargs(messages, functions=kwargs.get("functions")))
         rsp = await self.llm.ChatCompletion.acreate(**kwargs)
         self._update_costs(rsp.get('usage'))
         if event_bus:
@@ -274,9 +278,9 @@ class OpenAIGPTAPI(BaseGPTAPI, RateLimiter):
         rsp = await self._achat_completion(messages, event_bus=event_bus)
         return self.get_choice_text(rsp)
 
-    def _calc_usage(self, messages: list[dict], rsp: str) -> dict:
+    def _calc_usage(self, messages: list[dict], rsp: str, functions: List[dict]=None) -> dict:
         usage = {}
-        prompt_tokens = count_message_tokens(messages, self.model)
+        prompt_tokens = count_message_tokens(messages, self.model, functions=functions)
         completion_tokens = count_string_tokens(rsp, self.model)
         usage['prompt_tokens'] = prompt_tokens
         usage['completion_tokens'] = completion_tokens
@@ -316,10 +320,10 @@ class OpenAIGPTAPI(BaseGPTAPI, RateLimiter):
     def get_costs(self) -> Costs:
         return self._cost_manager.get_costs()
 
-    def get_max_tokens(self, messages: list[dict]):
+    def get_max_tokens(self, messages: list[dict], functions: List[dict]=None):
         if not self.auto_max_tokens:
             return CONFIG.max_tokens_rsp
-        return get_max_completion_tokens(messages, self.model, CONFIG.max_tokens_rsp)
+        return get_max_completion_tokens(messages, functions, self.model, CONFIG.max_tokens_rsp)
 
     def moderation(self, content: Union[str, list[str]]):
         try:
