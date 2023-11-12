@@ -12,7 +12,9 @@ import string
 from functools import wraps
 from typing import NamedTuple, Union, List, Dict, Any
 
+import httpx
 import openai
+from openai import AsyncOpenAI, OpenAI
 
 from schema_agents.config import CONFIG
 from schema_agents.logs import logger
@@ -135,26 +137,36 @@ class OpenAIGPTAPI(BaseGPTAPI, RateLimiter):
     """
     Check https://platform.openai.com/examples for examples
     """
-    def __init__(self, openai_api_model=None):
+    def __init__(self, model=None, seed=None, temperature=None):
         self.__init_openai(CONFIG)
-        self.llm = openai
-        self.model = openai_api_model or CONFIG.openai_api_model
+        self.model = model or CONFIG.openai_api_model
+        self.temperature = temperature or CONFIG.openai_temperature
+        self.seed = seed or CONFIG.openai_seed
         self.auto_max_tokens = False
         self._cost_manager = CostManager()
         RateLimiter.__init__(self, rpm=self.rpm)
         logger.info(f"OpenAI API model: {self.model}")
 
     def __init_openai(self, config):
-        openai.api_key = config.openai_api_key
-        if config.openai_api_base:
-            openai.api_base = config.openai_api_base
+        if config.openai_proxy:
+            openai.http_client = httpx.Client(
+                proxies=config.openai_proxy,
+            )
         if config.openai_api_type:
             openai.api_type = config.openai_api_type
             openai.api_version = config.openai_api_version
+        self.aclient = AsyncOpenAI(
+            api_key=config.openai_api_key,
+            base_url=config.openai_api_base,
+        )
+        self.client = OpenAI(
+            api_key=config.openai_api_key,
+            base_url=config.openai_api_base,
+        )
         self.rpm = int(config.get("RPM", 10))
 
     async def _achat_completion_stream(self, messages: list[dict], event_bus: EventBus=None, **kwargs) -> str:
-        response = await openai.ChatCompletion.acreate(
+        response = await self.aclient.chat.completions.create(
             **self._cons_kwargs(messages, functions=kwargs.get("functions")),
             stream=True,
             **kwargs
@@ -169,13 +181,16 @@ class OpenAIGPTAPI(BaseGPTAPI, RateLimiter):
         
         # iterate through the stream of events
         async for chunk in response:
+            chunk = chunk.dict()
             collected_chunks.append(chunk)  # save the event response
             chunk_message = chunk['choices'][0]['delta']  # extract the message
             collected_messages.append(chunk_message)  # save the message
             
-            if "function_call" in chunk_message:
-                if "name" in chunk_message["function_call"]:
+            if "function_call" in chunk_message and chunk_message["function_call"]:
+                if "name" in chunk_message["function_call"] and chunk_message["function_call"]["name"]:
                     func_call["name"] = chunk_message["function_call"]["name"]
+                    if event_bus:
+                        event_bus.emit("stream", {"sid": sid, "type": "function_call", "name": func_call["name"], "arguments": func_call.get("arguments"), "status": "start"})
                     # if not function_call_detected:
                     #     print(func_call["name"] + "(", end="")
                 if "arguments" in chunk_message["function_call"]:
@@ -186,12 +201,10 @@ class OpenAIGPTAPI(BaseGPTAPI, RateLimiter):
                 function_call_detected = True
             if event_bus:
                 if function_call_detected:
-                    if "function_call" in chunk_message and "name" in chunk_message["function_call"]:
-                        event_bus.emit("stream", {"sid": sid, "type": "function_call", "name": func_call["name"], "arguments": func_call["arguments"], "status": "start"})
-                    elif chunk["choices"][0].get("finish_reason") in ["function_call", "stop"]:
+                    if chunk["choices"][0].get("finish_reason") in ["function_call", "stop"]:
                         event_bus.emit("function_call", func_call)
                         event_bus.emit("stream", {"sid": sid, "type": "function_call", "name": func_call["name"], "arguments": func_call["arguments"], "status": "finished"})
-                    elif  "function_call" in chunk_message and "arguments" in chunk_message["function_call"]:
+                    elif chunk_message["function_call"].get("arguments"):
                         event_bus.emit("stream", {"sid": sid, "type": "function_call", "name": func_call["name"], "arguments": chunk_message["function_call"]["arguments"], "status": "in_progress"})
                 elif "content" in chunk_message and chunk_message["content"]:
                     event_bus.emit("stream", {"sid": sid, "type": "text", "content": chunk_message["content"]})
@@ -219,8 +232,9 @@ class OpenAIGPTAPI(BaseGPTAPI, RateLimiter):
             "max_tokens": self.get_max_tokens(messages, functions=functions),
             "n": 1,
             "stop": None,
-            "temperature": 0.3,
+            "temperature": self.temperature,
             "timeout": 3,
+            "seed": self.seed,
         }
         if CONFIG.openai_api_type == "azure":
             if CONFIG.deployment_name and CONFIG.deployment_id:
@@ -239,14 +253,14 @@ class OpenAIGPTAPI(BaseGPTAPI, RateLimiter):
 
     async def _achat_completion(self, messages: list[dict], event_bus: EventBus=None, **kwargs) -> dict:
         kwargs.update(self._cons_kwargs(messages, functions=kwargs.get("functions")))
-        rsp = await self.llm.ChatCompletion.acreate(**kwargs)
+        rsp = await self.aclient.chat.completions.create(**kwargs)
         self._update_costs(rsp.get('usage'))
         if event_bus:
             event_bus.emit("completion", rsp)
         return rsp
 
     def _chat_completion(self, messages: list[dict], event_bus: EventBus=None) -> dict:
-        rsp = self.llm.ChatCompletion.create(**self._cons_kwargs(messages))
+        rsp = self.client.chat.completions.create(**self._cons_kwargs(messages))
         self._update_costs(rsp)
         if event_bus:
             event_bus.emit("completion", rsp)
@@ -336,7 +350,7 @@ class OpenAIGPTAPI(BaseGPTAPI, RateLimiter):
             logger.error(f"moderating failed:{e}")
 
     def _moderation(self, content: Union[str, list[str]]):
-        rsp = self.llm.Moderation.create(input=content)
+        rsp = self.client.chat.moderations.create(input=content)
         return rsp
 
     async def amoderation(self, content: Union[str, list[str]]):
@@ -350,5 +364,5 @@ class OpenAIGPTAPI(BaseGPTAPI, RateLimiter):
             logger.error(f"moderating failed:{e}")
 
     async def _amoderation(self, content: Union[str, list[str]]):
-        rsp = await self.llm.Moderation.acreate(input=content)
+        rsp = await self.aclient.chat.moderations.create(input=content)
         return rsp

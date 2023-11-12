@@ -48,16 +48,18 @@ class Config(metaclass=Singleton):
             raise NotConfiguredException("Set OPENAI_API_KEY first")
 
         self.openai_api_base = self._get("OPENAI_API_BASE")
+        self.openai_proxy = None
         if not self.openai_api_base or "YOUR_API_BASE" == self.openai_api_base:
-            openai_proxy = self._get("OPENAI_PROXY") or self.global_proxy
-            if openai_proxy:
-                openai.proxy = openai_proxy
-            else:
+            self.openai_proxy = self._get("OPENAI_PROXY") or self.global_proxy
+            if not self.openai_proxy:
                 logger.info("Set OPENAI_API_BASE in case of network issues")
+
         self.openai_api_type = self._get("OPENAI_API_TYPE")
         self.openai_api_version = self._get("OPENAI_API_VERSION")
         self.openai_api_rpm = self._get("RPM", 3)
         self.openai_api_model = self._get("OPENAI_API_MODEL", "gpt-4-1106-preview")
+        self.openai_seed = self._get("OPENAI_SEED", 42)
+        self.openai_temperature = self._get("OPENAI_TEMPERATURE", 0)
         self.max_tokens_rsp = self._get("MAX_TOKENS", 2048)
         self.deployment_name = self._get("DEPLOYMENT_NAME")
         self.deployment_id = self._get("DEPLOYMENT_ID")
