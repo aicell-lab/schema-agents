@@ -9,6 +9,7 @@ ref2: https://github.com/Significant-Gravitas/Auto-GPT/blob/master/autogpt/llm/t
 ref3: https://github.com/hwchase17/langchain/blob/master/langchain/chat_models/openai.py
 """
 import tiktoken
+from math import ceil
 
 TOKEN_COSTS = {
     "gpt-3.5-turbo": {"prompt": 0.0015, "completion": 0.002},
@@ -42,6 +43,15 @@ TOKEN_MAX = {
     "gpt-4-1106-vision-preview": 128000,
     "text-embedding-ada-002": 8192,
 }
+
+def count_image_tokens(width: int, height: int, low_resolution: bool = False) -> int:
+    if low_resolution:
+        return 85
+    h = ceil(height / 512)
+    w = ceil(width / 512)
+    n = w * h
+    total = 85 + 170 * n
+    return total
 
 def num_tokens_from_functions(functions, encoding):
     """Return the number of tokens used by a list of functions."""
