@@ -133,7 +133,7 @@ class BaseGPTAPI(BaseChatbot):
 
     def get_choice_text(self, rsp: dict) -> str:
         """Required to provide the first text of choice"""
-        return rsp.get("choices")[0]["message"]["content"]
+        return rsp.choices[0].dict()["message"]["content"]
 
     def messages_to_prompt(self, messages: list[dict]):
         """[{"role": "user", "content": msg}] to user: <msg> etc."""
