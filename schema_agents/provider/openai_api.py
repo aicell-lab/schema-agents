@@ -190,7 +190,7 @@ class OpenAIGPTAPI(BaseGPTAPI, RateLimiter):
                 if "name" in chunk_message["function_call"] and chunk_message["function_call"]["name"]:
                     func_call["name"] = chunk_message["function_call"]["name"]
                     if event_bus:
-                        event_bus.emit("stream", {"sid": sid, "type": "function_call", "name": func_call["name"], "arguments": func_call.get("arguments"), "status": "start"})
+                        event_bus.emit("stream", {"sid": sid, "type": "function_call", "name": func_call["name"], "arguments": func_call.get("arguments", ""), "status": "start"})
                     # if not function_call_detected:
                     #     print(func_call["name"] + "(", end="")
                 if "arguments" in chunk_message["function_call"]:
