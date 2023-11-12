@@ -43,8 +43,41 @@ TOKEN_MAX = {
     "text-embedding-ada-002": 8192,
 }
 
+def num_tokens_from_functions(functions, encoding):
+    """Return the number of tokens used by a list of functions."""
+    num_tokens = 0
+    for function in functions:
+        function_tokens = len(encoding.encode(function['name']))
+        function_tokens += len(encoding.encode(function['description']))
+        
+        if 'parameters' in function:
+            parameters = function['parameters']
+            if 'properties' in parameters:
+                for propertiesKey in parameters['properties']:
+                    function_tokens += len(encoding.encode(propertiesKey))
+                    v = parameters['properties'][propertiesKey]
+                    for field in v:
+                        if field == 'type':
+                            function_tokens += 2
+                            function_tokens += len(encoding.encode(v['type']))
+                        elif field == 'description':
+                            function_tokens += 2
+                            function_tokens += len(encoding.encode(v['description']))
+                        elif field == 'enum':
+                            function_tokens -= 3
+                            for o in v['enum']:
+                                function_tokens += 3
+                                function_tokens += len(encoding.encode(o))
+                        else:
+                            print(f"Warning: not supported field {field}")
+                function_tokens += 11
 
-def count_message_tokens(messages, model="gpt-3.5-turbo-0613"):
+        num_tokens += function_tokens
+
+    num_tokens += 12 
+    return num_tokens
+
+def count_message_tokens(messages, model="gpt-3.5-turbo-0613", functions=None):
     """Return the number of tokens used by a list of messages."""
     try:
         encoding = tiktoken.encoding_for_model(model)
@@ -58,6 +91,8 @@ def count_message_tokens(messages, model="gpt-3.5-turbo-0613"):
         "gpt-4-32k-0314",
         "gpt-4-0613",
         "gpt-4-32k-0613",
+        "gpt-4-1106-preview",
+        "gpt-4-1106-vision-preview",
     }:
         tokens_per_message = 3
         tokens_per_name = 1
@@ -66,10 +101,10 @@ def count_message_tokens(messages, model="gpt-3.5-turbo-0613"):
         tokens_per_name = -1  # if there's a name, the role is omitted
     elif "gpt-3.5-turbo" in model:
         print("Warning: gpt-3.5-turbo may update over time. Returning num tokens assuming gpt-3.5-turbo-0613.")
-        return count_message_tokens(messages, model="gpt-3.5-turbo-0613")
+        return count_message_tokens(messages, model="gpt-3.5-turbo-0613", functions=functions)
     elif "gpt-4" in model:
         print("Warning: gpt-4 may update over time. Returning num tokens assuming gpt-4-0613.")
-        return count_message_tokens(messages, model="gpt-4-0613")
+        return count_message_tokens(messages, model="gpt-4-0613", functions=functions)
     else:
         raise NotImplementedError(
             f"""num_tokens_from_messages() is not implemented for model {model}. See https://github.com/openai/openai-python/blob/main/chatml.md for information on how messages are converted to tokens."""
@@ -82,6 +117,8 @@ def count_message_tokens(messages, model="gpt-3.5-turbo-0613"):
             if key == "name":
                 num_tokens += tokens_per_name
     num_tokens += 3  # every reply is primed with <|start|>assistant<|message|>
+    if functions:
+        num_tokens += num_tokens_from_functions(functions, encoding)
     return num_tokens
 
 
@@ -100,11 +137,12 @@ def count_string_tokens(string: str, model_name: str) -> int:
     return len(encoding.encode(string))
 
 
-def get_max_completion_tokens(messages: list[dict], model: str, default: int) -> int:
+def get_max_completion_tokens(messages: list[dict], functions: list[dict], model: str, default: int) -> int:
     """Calculate the maximum number of completion tokens for a given model and list of messages.
 
     Args:
         messages: A list of messages.
+        functions: A list of functions.
         model: The model name.
 
     Returns:
@@ -112,4 +150,4 @@ def get_max_completion_tokens(messages: list[dict], model: str, default: int) ->
     """
     if model not in TOKEN_MAX:
         return default
-    return TOKEN_MAX[model] - count_message_tokens(messages) - 1
+    return TOKEN_MAX[model] - count_message_tokens(messages, functions=functions) - 1
