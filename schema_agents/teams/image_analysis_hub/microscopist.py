@@ -3,10 +3,13 @@ from typing import Any, Dict, List, Optional, Union
 
 from pydantic import BaseModel, Field
 from schema_agents.role import Role
-from schema_agents.schema import Message
+from schema_agents.schema import Message, MemoryChunk
+from schema_agents.memory.long_term_memory import LongTermMemory
 from schema_agents.tools.code_interpreter import create_mock_client
 from schema_agents.utils.common import EventBus
 from schema_agents.logs import logger
+from schema_agents.teams.image_analysis_hub.schemas import ExperienceMemory, FunctionMemory
+
 class MicroscopeControlRequirements(BaseModel):
     """Requirements for controlling the microscope and acquire images."""
     path: str = Field(default="", description="save images path")
@@ -99,7 +102,7 @@ class Microscope():
             traceback=result.get("traceback")
         )
 
-def create_microscopist_with_ltm(client=None):
+def create_microscopist(client=None):
     if not client:
         client = create_mock_client()
 
@@ -126,9 +129,11 @@ async def main():
         goal="Acquire images from the microscope based on user's requests.",
         constraints=None,
         actions=[microscope.plan, microscope.multi_dimensional_acquisition],
+        long_term_memory=create_long_term_memory(),
         event_bus=event_bus
     )
 
+     
     messages = await ms.handle(Message(content="acquire an image and save to /tmp/img.png", role="User"))
     assert len(messages) == 2
     assert isinstance(messages[-1].data, ExecutionResult)

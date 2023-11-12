@@ -16,12 +16,31 @@ TOKEN_COSTS = {
     "gpt-3.5-turbo-0613": {"prompt": 0.0015, "completion": 0.002},
     "gpt-3.5-turbo-16k": {"prompt": 0.003, "completion": 0.004},
     "gpt-3.5-turbo-16k-0613": {"prompt": 0.003, "completion": 0.004},
+    "gpt-4-1106-vision-preview": {"prompt": 0.01, "completion": 0.03},
+    "gpt-4-1106-preview": {"prompt": 0.01, "completion": 0.03},
     "gpt-4-0314": {"prompt": 0.03, "completion": 0.06},
     "gpt-4": {"prompt": 0.03, "completion": 0.06},
     "gpt-4-32k": {"prompt": 0.06, "completion": 0.12},
     "gpt-4-32k-0314": {"prompt": 0.06, "completion": 0.12},
     "gpt-4-0613": {"prompt": 0.06, "completion": 0.12},
     "text-embedding-ada-002": {"prompt": 0.0004, "completion": 0.0},
+}
+
+
+TOKEN_MAX = {
+    "gpt-3.5-turbo": 4096,
+    "gpt-3.5-turbo-0301": 4096,
+    "gpt-3.5-turbo-0613": 4096,
+    "gpt-3.5-turbo-16k": 16384,
+    "gpt-3.5-turbo-16k-0613": 16384,
+    "gpt-4-0314": 8192,
+    "gpt-4": 8192,
+    "gpt-4-32k": 32768,
+    "gpt-4-32k-0314": 32768,
+    "gpt-4-0613": 8192,
+    "gpt-4-1106-preview": 128000,
+    "gpt-4-1106-vision-preview": 128000,
+    "text-embedding-ada-002": 8192,
 }
 
 
@@ -39,7 +58,7 @@ def count_message_tokens(messages, model="gpt-3.5-turbo-0613"):
         "gpt-4-32k-0314",
         "gpt-4-0613",
         "gpt-4-32k-0613",
-        }:
+    }:
         tokens_per_message = 3
         tokens_per_name = 1
     elif model == "gpt-3.5-turbo-0301":
@@ -79,3 +98,18 @@ def count_string_tokens(string: str, model_name: str) -> int:
     """
     encoding = tiktoken.encoding_for_model(model_name)
     return len(encoding.encode(string))
+
+
+def get_max_completion_tokens(messages: list[dict], model: str, default: int) -> int:
+    """Calculate the maximum number of completion tokens for a given model and list of messages.
+
+    Args:
+        messages: A list of messages.
+        model: The model name.
+
+    Returns:
+        The maximum number of completion tokens.
+    """
+    if model not in TOKEN_MAX:
+        return default
+    return TOKEN_MAX[model] - count_message_tokens(messages) - 1

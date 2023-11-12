@@ -22,6 +22,7 @@ from schema_agents.utils.token_counter import (
     TOKEN_COSTS,
     count_message_tokens,
     count_string_tokens,
+    get_max_completion_tokens,
 )
 from schema_agents.utils.common import EventBus
 
@@ -134,12 +135,13 @@ class OpenAIGPTAPI(BaseGPTAPI, RateLimiter):
     """
     Check https://platform.openai.com/examples for examples
     """
-    def __init__(self):
+    def __init__(self, openai_api_model=None):
         self.__init_openai(CONFIG)
         self.llm = openai
-        self.model = CONFIG.openai_api_model
+        self.model = openai_api_model or CONFIG.openai_api_model
         self._cost_manager = CostManager()
         RateLimiter.__init__(self, rpm=self.rpm)
+        logger.info(f"OpenAI API model: {self.model}")
 
     def __init_openai(self, config):
         openai.api_key = config.openai_api_key
@@ -313,3 +315,36 @@ class OpenAIGPTAPI(BaseGPTAPI, RateLimiter):
 
     def get_costs(self) -> Costs:
         return self._cost_manager.get_costs()
+
+    def get_max_tokens(self, messages: list[dict]):
+        if not self.auto_max_tokens:
+            return CONFIG.max_tokens_rsp
+        return get_max_completion_tokens(messages, self.model, CONFIG.max_tokens_rsp)
+
+    def moderation(self, content: Union[str, list[str]]):
+        try:
+            if not content:
+                logger.error("content cannot be empty!")
+            else:
+                rsp = self._moderation(content=content)
+                return rsp
+        except Exception as e:
+            logger.error(f"moderating failed:{e}")
+
+    def _moderation(self, content: Union[str, list[str]]):
+        rsp = self.llm.Moderation.create(input=content)
+        return rsp
+
+    async def amoderation(self, content: Union[str, list[str]]):
+        try:
+            if not content:
+                logger.error("content cannot be empty!")
+            else:
+                rsp = await self._amoderation(content=content)
+                return rsp
+        except Exception as e:
+            logger.error(f"moderating failed:{e}")
+
+    async def _amoderation(self, content: Union[str, list[str]]):
+        rsp = await self.llm.Moderation.acreate(input=content)
+        return rsp
