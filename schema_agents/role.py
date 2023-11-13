@@ -274,7 +274,7 @@ class Role:
 
         functions = [schema_to_function(s) for s in set(output_types + input_schema)]
         if len(output_types) == 1:
-            function_call = {"name": output_types[0].__name__}
+            function_call = {"type": "function", "function": {"name": output_types[0].__name__}}
         else:
             function_call = "auto"
         response = await self._llm.aask(messages, system_msgs, functions=functions, function_call=function_call, event_bus=self._event_bus)

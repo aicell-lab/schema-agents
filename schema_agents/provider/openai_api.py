@@ -168,7 +168,7 @@ class OpenAIGPTAPI(BaseGPTAPI, RateLimiter):
 
     async def _achat_completion_stream(self, messages: list[dict], event_bus: EventBus=None, **kwargs) -> str:
         response = await self.aclient.chat.completions.create(
-            **self._cons_kwargs(messages, functions=kwargs.get("functions")),
+            **self._cons_kwargs(messages, functions=kwargs.get("tools")),
             stream=True,
             **kwargs
         )
@@ -186,7 +186,8 @@ class OpenAIGPTAPI(BaseGPTAPI, RateLimiter):
             collected_chunks.append(chunk)  # save the event response
             chunk_message = chunk['choices'][0]['delta']  # extract the message
             collected_messages.append(chunk_message)  # save the message
-            
+            if chunk_message.get("tool_calls"):
+                chunk_message["function_call"] = chunk_message.get("tool_calls")[0]['function']
             if "function_call" in chunk_message and chunk_message["function_call"]:
                 if "name" in chunk_message["function_call"] and chunk_message["function_call"]["name"]:
                     func_call["name"] = chunk_message["function_call"]["name"]
@@ -202,7 +203,7 @@ class OpenAIGPTAPI(BaseGPTAPI, RateLimiter):
                     if chunk["choices"][0].get("finish_reason") in ["function_call", "stop"]:
                         event_bus.emit("function_call", func_call)
                         event_bus.emit("stream", {"query_id": query_id, "session_id": session_id, "type": "function_call", "name": func_call["name"], "arguments": func_call["arguments"], "status": "finished"})
-                    elif "function_call" in chunk_message and chunk_message["function_call"].get("arguments"):
+                    elif chunk_message.get("function_call") and chunk_message["function_call"].get("arguments"):
                         event_bus.emit("stream", {"query_id": query_id, "session_id": session_id, "type": "function_call", "name": func_call["name"], "arguments": chunk_message["function_call"]["arguments"], "status": "in_progress"})
                 elif "content" in chunk_message and chunk_message["content"]:
                     event_bus.emit("stream", {"query_id": query_id, "session_id": session_id, "type": "text", "content": chunk_message["content"]})
@@ -222,7 +223,7 @@ class OpenAIGPTAPI(BaseGPTAPI, RateLimiter):
     def _cons_kwargs(self, messages: list[dict], functions: list[dict]=None) -> dict:
         kwargs = {
             "messages": messages,
-            "max_tokens": self.get_max_tokens(messages, functions=functions),
+            "max_tokens": self.get_max_tokens(messages, functions=[func['function'] for func in functions if func.get("type") == "function"]),
             "n": 1,
             "stop": None,
             "temperature": self.temperature,
@@ -274,7 +275,8 @@ class OpenAIGPTAPI(BaseGPTAPI, RateLimiter):
     async def acompletion_function(self, messages: list[dict], functions: List[Dict[str, Any]]=None, function_call: Union[str, Dict[str, str]]=None, event_bus: EventBus=None) -> dict:
         # if isinstance(messages[0], Message):
         #     messages = self.messages_to_dict(messages)
-        rsp = await self._achat_completion_stream(messages, functions=functions, function_call=function_call, event_bus=event_bus)
+        tools = [{"type": "function", "function": func} for func in functions]
+        rsp = await self._achat_completion_stream(messages, tools=tools, tool_choice=function_call, event_bus=event_bus)
         return rsp
 
     @retry(max_retries=6)
