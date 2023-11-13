@@ -60,6 +60,7 @@ class Config(metaclass=Singleton):
         self.openai_api_model = self._get("OPENAI_API_MODEL", "gpt-4-1106-preview")
         self.openai_seed = self._get("OPENAI_SEED", 42)
         self.openai_temperature = self._get("OPENAI_TEMPERATURE", 0)
+        self.openai_timeout = self._get("OPENAI_TIMEOUT", 15)
         self.max_tokens_rsp = self._get("MAX_TOKENS", 2048)
         self.deployment_name = self._get("DEPLOYMENT_NAME")
         self.deployment_id = self._get("DEPLOYMENT_ID")

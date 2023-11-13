@@ -252,13 +252,7 @@ class Role:
         
         assert output_schema is str or isinstance(output_schema, typing._UnionGenericAlias) or issubclass(output_schema, BaseModel)
         
-        if input_schema:
-            assert isinstance(input_schema, list)
-            sch = ",".join([f"`{i.__name__}`" for i in input_schema])
-            prefix = f"Please generate a response based on: {sch}. "
-        else:
-            prefix = ""
-
+        prefix = ""
         if output_schema is str:
             output_types = []
             prompt = prompt or f"{prefix}"
