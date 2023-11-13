@@ -14,7 +14,9 @@ import uuid
 from typing import List, Tuple
 
 from schema_agents.logs import logger
+from contextvars import ContextVar
 
+current_session = ContextVar('current_session')
 
 def check_cmd_exists(command) -> int:
     """ 检查命令是否存在
@@ -244,12 +246,18 @@ class EventBus:
 
     def on(self, event_name, func):
         """Register an event callback."""
-        self._callbacks[event_name] = self._callbacks.get(event_name, []) + [func]
+        if self._callbacks.get(event_name):
+            self._callbacks[event_name].add(func)
+        else:
+            self._callbacks[event_name] = {func}
         return func
 
     def once(self, event_name, func):
         """Register an event callback that only run once."""
-        self._callbacks[event_name] = self._callbacks.get(event_name, []) + [func]
+        if self._callbacks.get(event_name):
+            self._callbacks[event_name].add(func)
+        else:
+            self._callbacks[event_name] = {func}
         # mark once callback
         self._callbacks[event_name].once = True
         return func
@@ -301,12 +309,12 @@ class EventBus:
         else:
             self._callbacks.get(event_name, []).remove(func)
 
-    def register_default_events(self):
-        async def stream_callback(message):
-            if message["type"] == "function_call":
-                if message["status"] == "in_progress":
-                    print(message["arguments"], end="")
-                else:
-                    print(f'\nGenerating {message["name"]} ({message["status"]}): {message["arguments"]}')
+    async def stream_callback(self, message):
+        if message["type"] == "function_call":
+            if message["status"] == "in_progress":
+                print(message["arguments"], end="")
+            else:
+                print(f'\nGenerating {message["name"]} ({message["status"]}): {message["arguments"]}')
 
-        self.on("stream", stream_callback)
+    def register_default_events(self):
+        self.on("stream", self.stream_callback)

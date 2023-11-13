@@ -22,8 +22,16 @@ from schema_agents.schema import Message
 from schema_agents.memory.long_term_memory import LongTermMemory
 from schema_agents.utils.common import EventBus
 from pydantic import BaseModel
+from schema_agents.utils.common import current_session
+from contextlib import asynccontextmanager
+from contextvars import copy_context
 
 PREFIX_TEMPLATE = """You are a {profile}, named {name}, your goal is {goal}, and the constraint is {constraints}. """
+
+@asynccontextmanager
+async def create_session_context(session_id):
+    current_session.set(session_id)
+    yield copy_context()
 
 class RoleSetting(BaseModel):
     """Role setting"""
@@ -168,17 +176,17 @@ class Role:
         return False
     
     # @retry(stop=stop_after_attempt(2), wait=wait_fixed(1))
-    async def handle(self, msg: Union[str, Message]) -> list[Message]:
+    async def handle(self, msg: Union[str, Message], session_id=None) -> list[Message]:
         """Handle message"""
         if isinstance(msg, str):
             msg = Message(role="User", content=msg)
         if not self.can_handle(msg):
             raise ValueError(f"Invalid message, the role {self._setting} cannot handle the message: {msg}")
-        session_id = str(uuid.uuid4())
-        msg.session_ids.append(session_id)
+        _session_id = str(uuid.uuid4())
+        msg.session_ids.append(_session_id)
         messages = []
         def on_message(new_msg):
-            if session_id in new_msg.session_ids:
+            if _session_id in new_msg.session_ids:
                 messages.append(new_msg)
 
         self._event_bus.on("message", on_message)
@@ -189,7 +197,11 @@ class Role:
                 actions = self._action_index[context_class]
                 for action in actions:
                     responses.append(self._run_action(action, msg))
-            responses = await asyncio.gather(*responses)
+            if session_id:
+                async with create_session_context(session_id):
+                    responses = await asyncio.gather(*responses)
+            else:
+                responses = await asyncio.gather(*responses)
             outputs = []  
             for response in responses:
                 if not response:
@@ -204,7 +216,11 @@ class Role:
                 # self._rc.memory.add(output)
                 # logger.debug(f"{response}")
                 outputs.append(output)
-                await self._event_bus.aemit("message", output)
+                if session_id:
+                    async with create_session_context(session_id):
+                        await self._event_bus.aemit("message", output)
+                else:
+                    await self._event_bus.aemit("message", output)
         finally:
             self._event_bus.off("message", on_message)
         return messages
