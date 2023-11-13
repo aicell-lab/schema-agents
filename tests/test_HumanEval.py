@@ -1,12 +1,17 @@
-from schema_agents.role import Role
+
 import random
 import os
 import json
 from typing import List, Union, Optional, Dict, Any
-from pydantic import BaseModel, Field
-from human_eval.data import write_jsonl, read_problems
-from schema_agents.teams.image_analysis_hub.schemas import PythonFunctionScript
 
+from pydantic import BaseModel, Field
+from human_eval.evaluation import evaluate_functional_correctness
+from human_eval.data import write_jsonl, read_problems
+
+from schema_agents.tools.code_interpreter import create_mock_client
+from schema_agents.schema import Message
+from schema_agents.teams.image_analysis_hub.schemas import PythonFunctionScript
+from schema_agents.role import Role
 
 class PythonOutput(BaseModel):
     """Represents a Python function with all its properties."""
@@ -15,12 +20,7 @@ class PythonOutput(BaseModel):
     docstring: Optional[str] = Field(None, description="Brief notes for usage, debugging, potential error fixing, and further improvements.")
    
 
-async def generate_code(
-    req, role: Role
-) -> PythonOutput:
-    # retrieve req-related memories from long term memory
-    response = await role.aask(req, PythonOutput)
-    return response
+
 
 # async def test_run_python_function(
 #     role, client, service_id, python_function: PythonFunctionScript
@@ -46,24 +46,54 @@ async def generate_code(
     # return python_function
 
 
-def create_data_engineer(client=None):
-    async def develop_python_functions(
-        req, role: Role
-    ) -> PythonOutput:
-        """Complete python functions based on CodeEvalInput to pass the tests."""
-        
-        # if isinstance(req, SoftwareRequirement):
-        func = await generate_code(req, role)
-        # try:
-        #     func = await test_run_python_function(role, client, req.id, func)
-        # except RuntimeError as exp:
-        #     req.additional_notes += f"\nPlease avoid the following error: {exp}"
-        #     func = await generate_code(req, role)
-        #     func = await test_run_python_function(role, client, req.id, func)
 
-        return func
+async def generate_code(
+    req, role: Role
+) -> PythonOutput:
+    """Complete python functions based on the given input."""
+    # retrieve req-related memories from long term memory
+    response = await role.aask(req, PythonOutput)
+    return response
+
+async def develop_python_functions(
+    req: str, role: Role
+) -> PythonOutput:
+    """Complete python functions based on CodeEvalInput to pass the tests."""
+    
+    # if isinstance(req, SoftwareRequirement):
+    func = await generate_code(req, role)
+    # try:
+    #     func = await test_run_python_function(role, client, req.id, func)
+    # except RuntimeError as exp:
+    #     req.additional_notes += f"\nPlease avoid the following error: {exp}"
+    #     func = await generate_code(req, role)
+    #     func = await test_run_python_function(role, client, req.id, func)
+
+    return func
 
 
+
+async def main():
+    # Your existing code...
+
+    problems = read_problems()
+    test_path = "/home/alalulu/workspace/schema-agents/tests/data"
+    
+    selected_problems = dict(random.sample(problems.items(), 20))
+    write_jsonl(os.path.join(test_path, "selected_problems.jsonl.gz"), selected_problems.values())
+    
+    sub_problem = read_problems(os.path.join(test_path, "selected_problems.jsonl.gz"))
+
+    num_samples_per_task = 1
+    samples = await asyncio.gather(*[
+        generate_sample(task_id, sub_problem[task_id]["prompt"], num_samples_per_task)
+        for task_id in sub_problem
+    ])
+
+    write_jsonl(os.path.join(test_path, "samples.jsonl"), samples)
+    await evaluate_functional_correctness("/home/alalulu/workspace/schema-agents/tests/data/samples.jsonl", [1], problem_file=os.path.join(test_path, "selected_problems.jsonl.gz"))
+
+async def generate_sample(task_id, prompt, num_samples):
     data_engineer = Role(
         name="Alice",
         profile="Data Engineer",
@@ -71,18 +101,27 @@ def create_data_engineer(client=None):
         constraints=None,
         actions=[develop_python_functions],
     )
-    return data_engineer
 
-problems = read_problems()
-DataEngineer = create_data_engineer()
-ds = DataEngineer()
-# get the first sample in problems
-sub_problem = dict(random.sample(problems.items(), 1))
-num_samples_per_task = 2
+    async def generate_one_completion(prompt):
+        response = await data_engineer.handle(Message(content=prompt, role="User"))
+        script = response[-1].data.function_script
+        return script
 
-samples = [
-    dict(task_id=task_id, completion=ds.develop_python_functions(sub_problem[task_id]["prompt"])['function_script'])
-    for task_id in sub_problem
-    for _ in range(num_samples_per_task)
-]
-write_jsonl(os.path.join("./.data","samples.jsonl"), samples)
+    return {
+        "task_id": task_id,
+        "completion": await generate_one_completion(prompt)
+    }
+if __name__ == "__main__":
+    # test_path = "/home/alalulu/workspace/schema-agents/tests/data"
+    
+    # import asyncio
+    # asyncio.run(main())
+    problems = read_problems()
+    def check_correctness():
+        # Importing multiprocessing only when this function is called
+        import multiprocessing
+        manager = multiprocessing.Manager()
+        test_path = "/home/alalulu/workspace/schema-agents/tests/data"
+        # human_path = "/home/alalulu/workspace/human-eval/data"
+        print(evaluate_functional_correctness(os.path.join(test_path,"samples.jsonl"), [1], problem_file=os.path.join(test_path, "selected_problems.jsonl.gz")))
+    check_correctness()
