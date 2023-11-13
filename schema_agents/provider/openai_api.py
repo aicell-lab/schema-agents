@@ -26,8 +26,8 @@ from schema_agents.utils.token_counter import (
     count_string_tokens,
     get_max_completion_tokens,
 )
-from schema_agents.utils.common import EventBus
-
+from schema_agents.utils.common import EventBus, current_session
+from contextvars import copy_context
 
 def retry(max_retries):
     def decorator(f):
@@ -151,6 +151,7 @@ class OpenAIGPTAPI(BaseGPTAPI, RateLimiter):
         if config.openai_proxy:
             openai.http_client = httpx.Client(
                 proxies=config.openai_proxy,
+                timeout=20,
             )
         if config.openai_api_type:
             openai.api_type = config.openai_api_type
@@ -177,8 +178,8 @@ class OpenAIGPTAPI(BaseGPTAPI, RateLimiter):
         collected_messages = []
         function_call_detected = False
         func_call = {}
-        sid = ''.join(random.choices(string.ascii_lowercase + string.digits, k=8))
-        
+        query_id = ''.join(random.choices(string.ascii_lowercase + string.digits, k=8))
+        session_id = current_session.get() if current_session in copy_context() else None
         # iterate through the stream of events
         async for chunk in response:
             chunk = chunk.dict()
@@ -190,7 +191,7 @@ class OpenAIGPTAPI(BaseGPTAPI, RateLimiter):
                 if "name" in chunk_message["function_call"] and chunk_message["function_call"]["name"]:
                     func_call["name"] = chunk_message["function_call"]["name"]
                     if event_bus:
-                        event_bus.emit("stream", {"sid": sid, "type": "function_call", "name": func_call["name"], "arguments": func_call.get("arguments", ""), "status": "start"})
+                        event_bus.emit("stream", {"query_id": query_id, "session_id": session_id, "type": "function_call", "name": func_call["name"], "arguments": func_call.get("arguments", ""), "status": "start"})
                     # if not function_call_detected:
                     #     print(func_call["name"] + "(", end="")
                 if "arguments" in chunk_message["function_call"]:
@@ -203,11 +204,11 @@ class OpenAIGPTAPI(BaseGPTAPI, RateLimiter):
                 if function_call_detected:
                     if chunk["choices"][0].get("finish_reason") in ["function_call", "stop"]:
                         event_bus.emit("function_call", func_call)
-                        event_bus.emit("stream", {"sid": sid, "type": "function_call", "name": func_call["name"], "arguments": func_call["arguments"], "status": "finished"})
+                        event_bus.emit("stream", {"query_id": query_id, "session_id": session_id, "type": "function_call", "name": func_call["name"], "arguments": func_call["arguments"], "status": "finished"})
                     elif chunk_message["function_call"].get("arguments"):
-                        event_bus.emit("stream", {"sid": sid, "type": "function_call", "name": func_call["name"], "arguments": chunk_message["function_call"]["arguments"], "status": "in_progress"})
+                        event_bus.emit("stream", {"query_id": query_id, "session_id": session_id, "type": "function_call", "name": func_call["name"], "arguments": chunk_message["function_call"]["arguments"], "status": "in_progress"})
                 elif "content" in chunk_message and chunk_message["content"]:
-                    event_bus.emit("stream", {"sid": sid, "type": "text", "content": chunk_message["content"]})
+                    event_bus.emit("stream", {"query_id": query_id, "session_id": session_id, "type": "text", "content": chunk_message["content"]})
 
         # if function_call_detected:
         #     print(")", end="")
