@@ -68,6 +68,17 @@ Ensure that the response is clear, informative, and covers all aspects of the us
 """
 
 PROJECT_MANAGER_PROMPT = """
+After receiving detailed UserRequirements from the UX manager regarding software needs, your task is to compile a comprehensive SoftwareRequirement. This Pydantic class includes the following fields:
+
+id: A concise identifier for the application.
+original_requirements: The refined and complete set of original requirements from the user.
+python_function_requirements: A list specifying the requirements for the Python functions to be executed. Ensure these are represented as PythonFunctionRequirement objects.
+additional_notes: Any supplementary notes or requirements that demand consideration.
+
+Your response should meticulously incorporate all facets mentioned in the UserRequirements, offering a clear and detailed SoftwareRequirement. Pay particular attention to accurately translating the Python function requirements into a well-structured list of PythonFunctionRequirement objects.
+"""
+
+DATA_ENGINEER_PROMPT = """
 """
 
 class PythonFunctionRequirement(BaseModel):
@@ -107,15 +118,24 @@ class SoftwareRequirement(BaseModel):
 
 
     
-async def create_user_requirements(req: str, role: Role) -> UserRequirements:
+async def schema_create_user_requirements(req: str, role: Role) -> UserRequirements:
     """Create user requirement."""
     return await role.aask(req, UserRequirements)
 
-async def create_software_requirements(req: UserRequirements, role: Role) -> SoftwareRequirement:
+async def create_user_requirements(req: str, role: Role) -> str:
+    """Create user requirement."""
+    return await role.aask(req, str)
+
+
+async def schema_create_software_requirements(req: UserRequirements, role: Role) -> SoftwareRequirement:
     """Create software requirement."""
     return await role.aask(req, SoftwareRequirement)
 
-async def develop_python_functions(req: SoftwareRequirement, role: Role) -> PythonFunctionScript:
+async def create_software_requirements(req: str, role: Role) -> str:
+    """Create software requirement."""
+    return await role.aask(req, str)
+
+async def schema_develop_python_functions(req: SoftwareRequirement, role: Role) -> PythonFunctionScript:
         """Develop python functions based on software requirements."""
         async def generate_code(req: SoftwareRequirement, role: Role) -> PythonFunctionScript:
             return await role.aask(req, PythonFunctionScript)
@@ -155,6 +175,9 @@ async def develop_python_functions(req: SoftwareRequirement, role: Role) -> Pyth
             func = await test_run_python_function(role, client, req.id, func)
         return func
     
+    
+    
+    
 def create_schema_team(investment):
     """Create a team of schema agents."""
     schema_team = Team(name="Schema agents team", profile="A team of schema agents for different roles.", goal="Work as team to implement user's query.", investment=investment)
@@ -162,20 +185,20 @@ def create_schema_team(investment):
             profile="UX Manager",
             goal="Focus on understanding the user's needs and experience. Understand the user needs and communicate these findings to the project manager by calling `UserRequirements`.",
             constraints=None,
-            actions=[create_user_requirements])
+            actions=[schema_create_user_requirements])
 
     project_manager = Role(name="Alice",
                     profile="Project Manager",
                     goal="Efficiently communicate with ux manager and translate the user's needs `UserRequirements` into software requirements `SoftwareRequirement`.",
                     constraints=None,
-                    actions=[create_software_requirements])
+                    actions=[schema_create_software_requirements])
 
     data_engineer = Role(
             name="Alice",
             profile="Data Engineer",
             goal="Develop the python function script according to the software requirement `SoftwareRequirement`, ensuring that it fulfills the desired functionality. Implement necessary algorithms, handle data processing, and write tests to validate the correctness of the function.",
             constraints=None,
-            actions=[develop_python_functions],
+            actions=[schema_develop_python_functions],
         )
     schema_team.hire([ux_manager, project_manager, data_engineer])
     return schema_team
