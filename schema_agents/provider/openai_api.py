@@ -137,10 +137,11 @@ class OpenAIGPTAPI(BaseGPTAPI, RateLimiter):
     """
     Check https://platform.openai.com/examples for examples
     """
-    def __init__(self, model=None, seed=None, temperature=None):
+    def __init__(self, model=None, seed=None, temperature=None, timeout=None):
         self.__init_openai(CONFIG)
         self.model = model or CONFIG.openai_api_model
         self.temperature = temperature or CONFIG.openai_temperature
+        self.timeout = timeout or CONFIG.openai_timeout
         self.seed = seed or CONFIG.openai_seed
         self.auto_max_tokens = False
         self._cost_manager = CostManager()
@@ -151,7 +152,6 @@ class OpenAIGPTAPI(BaseGPTAPI, RateLimiter):
         if config.openai_proxy:
             openai.http_client = httpx.Client(
                 proxies=config.openai_proxy,
-                timeout=20,
             )
         if config.openai_api_type:
             openai.api_type = config.openai_api_type
@@ -192,31 +192,23 @@ class OpenAIGPTAPI(BaseGPTAPI, RateLimiter):
                     func_call["name"] = chunk_message["function_call"]["name"]
                     if event_bus:
                         event_bus.emit("stream", {"query_id": query_id, "session_id": session_id, "type": "function_call", "name": func_call["name"], "arguments": func_call.get("arguments", ""), "status": "start"})
-                    # if not function_call_detected:
-                    #     print(func_call["name"] + "(", end="")
                 if "arguments" in chunk_message["function_call"]:
                     if "arguments" not in func_call:
                         func_call["arguments"] = ""
                     func_call["arguments"] += chunk_message["function_call"]["arguments"]
-                    # print(chunk_message["function_call"]["arguments"], end="")
                 function_call_detected = True
             if event_bus:
                 if function_call_detected:
                     if chunk["choices"][0].get("finish_reason") in ["function_call", "stop"]:
                         event_bus.emit("function_call", func_call)
                         event_bus.emit("stream", {"query_id": query_id, "session_id": session_id, "type": "function_call", "name": func_call["name"], "arguments": func_call["arguments"], "status": "finished"})
-                    elif chunk_message["function_call"].get("arguments"):
+                    elif "function_call" in chunk_message and chunk_message["function_call"].get("arguments"):
                         event_bus.emit("stream", {"query_id": query_id, "session_id": session_id, "type": "function_call", "name": func_call["name"], "arguments": chunk_message["function_call"]["arguments"], "status": "in_progress"})
                 elif "content" in chunk_message and chunk_message["content"]:
                     event_bus.emit("stream", {"query_id": query_id, "session_id": session_id, "type": "text", "content": chunk_message["content"]})
 
-        # if function_call_detected:
-        #     print(")", end="")
-        # print()
-        
         if function_call_detected:
             full_reply_content = func_call
-            # TODO: check if the usage calculation is correct
             usage = self._calc_usage(messages, f"{func_call['name']}({func_call['arguments']})", functions=kwargs.get("functions", None))
         else:
             full_reply_content = ''.join([m.get('content', '') for m in collected_messages])
@@ -234,7 +226,7 @@ class OpenAIGPTAPI(BaseGPTAPI, RateLimiter):
             "n": 1,
             "stop": None,
             "temperature": self.temperature,
-            "timeout": 3,
+            "timeout": self.timeout,
             "seed": self.seed,
         }
         if CONFIG.openai_api_type == "azure":
