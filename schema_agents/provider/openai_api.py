@@ -211,7 +211,7 @@ class OpenAIGPTAPI(BaseGPTAPI, RateLimiter):
             full_reply_content = func_call
             usage = self._calc_usage(messages, f"{func_call['name']}({func_call['arguments']})", functions=kwargs.get("functions", None))
         else:
-            full_reply_content = ''.join([m.get('content', '') for m in collected_messages])
+            full_reply_content = ''.join([m.get('content', '') for m in collected_messages if m.get('content')])
             usage = self._calc_usage(messages, full_reply_content, functions=kwargs.get("functions", None))
         self._update_costs(usage)
         if event_bus:

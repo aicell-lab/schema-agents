@@ -126,3 +126,19 @@ async def test_schema_str():
     instruct = GetExtraInformation(content="Tell me the use case in 1 sentence.", summary="Requesting details about the use case")
     responses = await user.handle(Message(role="Bot", content=instruct.json(), data=instruct))
     assert isinstance(responses[0].data, SearchInternetQuery)
+
+
+@pytest.mark.asyncio
+async def test_respond_user_str():
+    async def respond_to_user(query: str, role: Role) -> str:
+        """Respond to user."""
+        response = await role.aask(query, str)
+        return response
+        
+    role = Role(name="Alice",
+                profile="Customer service",
+                goal="Efficiently communicate with the user and translate the user's needs to technical requirements",
+                constraints=None,
+                actions=[respond_to_user])
+    responses = await role.handle("Say hello")
+    assert responses

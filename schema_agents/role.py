@@ -60,7 +60,7 @@ class Role:
         self._output_schemas = []
         self._action_index = {}
         self._user_support_actions = []
-        self._watch_actions = set()
+        self._watch_schemas = set()
         self.long_term_memory = long_term_memory
         if event_bus:
             self.set_event_bus(event_bus)
@@ -73,19 +73,21 @@ class Role:
         self._actions = []
 
 
-    def _watch(self, actions: Iterable[Union[str, BaseModel]]):
+    def _watch(self, schemas: Iterable[Union[str, BaseModel]]):
         """Watch actions."""
-        self._watch_actions.update(actions)
+        self._watch_schemas.update(schemas)
     
     def set_event_bus(self, event_bus: EventBus):
         """Set event bus."""
         self._event_bus = event_bus
 
         async def handle_message(msg):
-            if msg.data and type(msg.data) in self._watch_actions:
-                await self.handle(msg)
-            elif msg.data is None and str in self._watch_actions:
-                await self.handle(msg)
+            if msg.data and type(msg.data) in self._watch_schemas:
+                if msg.cause_by not in self._action_index[type(msg.data)]:
+                    await self.handle(msg)
+            elif msg.data is None and str in self._watch_schemas:
+                if msg.cause_by not in self._action_index[str]:
+                    await self.handle(msg)
 
         self._event_bus.on("message", handle_message)
         logger.info(f"Mounting {self._setting} to event bus: {self._event_bus.name}.")
