@@ -157,6 +157,7 @@ async def test_run_python_function(
     results = await client.executeScript(
         {"script": python_function.function_script + "\n" + python_function.test_script}
     )
+    assert results, "No results returned from the test script."
     if results["status"] != "ok":
         output_summary = json.dumps(
             {k: results[k] for k in results.keys() if results[k]}, indent=1
