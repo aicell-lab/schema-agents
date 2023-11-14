@@ -140,9 +140,9 @@ class OpenAIGPTAPI(BaseGPTAPI, RateLimiter):
     def __init__(self, model=None, seed=None, temperature=None, timeout=None):
         self.__init_openai(CONFIG)
         self.model = model or CONFIG.openai_api_model
-        self.temperature = temperature or CONFIG.openai_temperature
+        self.temperature = float(temperature or CONFIG.openai_temperature)
         self.timeout = timeout or CONFIG.openai_timeout
-        self.seed = seed or CONFIG.openai_seed
+        self.seed = int(seed or CONFIG.openai_seed)
         self.auto_max_tokens = False
         self._cost_manager = CostManager()
         RateLimiter.__init__(self, rpm=self.rpm)
