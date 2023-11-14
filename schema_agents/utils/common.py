@@ -315,6 +315,8 @@ class EventBus:
                 print(message["arguments"], end="")
             else:
                 print(f'\nGenerating {message["name"]} ({message["status"]}): {message["arguments"]}')
+        elif message["type"] == "text":
+            print(message["text"], end="")
 
     def register_default_events(self):
         self.on("stream", self.stream_callback)
