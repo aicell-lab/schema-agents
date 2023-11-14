@@ -138,7 +138,14 @@ async def schema_create_user_requirements(req: str, role: Role) -> UserRequireme
     return await role.aask(req, UserRequirements)
 
 async def create_user_requirements(req: str, role: Role) -> str:
-    """Create user requirement."""
+    """Create user requirement.
+    Generate a detailed user requirements based on the user_query related to software requirements. The user requirements must contain the following information:
+    - goal: The goal of the user.
+    - data: Requirements for the data.
+    - validation: Additional information for testing, e.g., test data and the expected outcome.
+    - notes: Additional notes.
+    Ensure that the response is clear, informative, and covers all aspects of the user's inquiry. Your response will be sent to the project manager for further processing.
+    """
     return await role.aask(req, str)
 
 
@@ -147,7 +154,17 @@ async def schema_create_software_requirements(req: UserRequirements, role: Role)
     return await role.aask(req, SoftwareRequirement)
 
 async def create_software_requirements(req: str, role: Role) -> str:
-    """Create software requirement."""
+    """Create software requirement.
+    After receiving detailed user requirements from the UX manager regarding software needs, your task is to compile a comprehensive software requirement which should include the following fields:
+
+    - id: A concise identifier for the application.
+    - original_requirements: The refined and complete set of original requirements from the user.
+    - python_function_requirements: A list specifying the requirements for the Python functions to be executed. Ensure these are represented as PythonFunctionRequirement objects.
+    - additional_notes: Any supplementary notes or requirements that demand consideration.
+
+    Your response should meticulously incorporate all facets mentioned in the user requirements, offering a clear and detailed software requirement. Pay particular attention to accurately translating the Python function requirements into a well-structured list of python function requirement objects.
+    Your response will be sent to the data engineer for further processing.
+    """
     return await role.aask(req, str)
 
 async def schema_develop_python_functions(req: SoftwareRequirement, role: Role) -> PythonFunctionScript:
@@ -155,7 +172,24 @@ async def schema_develop_python_functions(req: SoftwareRequirement, role: Role) 
     # async def generate_code(req: SoftwareRequirement, role: Role) -> PythonFunctionScript:
     return await role.aask(req, PythonFunctionScript)
 
-        
+async def develop_python_functions(req: str, role: Role) -> str:
+    """Develop python functions based on software requirements.
+    Your goal as a data engineer is to develop a Python function script based on the provided SoftwareRequirement from the project manager. The script should fulfill the desired functionality, implementing necessary algorithms, handling data processing, and including tests to validate the correctness of the function.
+    You have received the following information from the project manager:
+
+    - original requirement: The refined and complete set of original requirements from the user.
+    - python function requirements: A list specifying the requirements for the Python functions to be implemented.
+    
+    Your response should include a Python function and test script with the following properties:
+    - function_names: A list of function names.
+    - function_script: The actual script for the function, which will be executed directly by the user. Ensure that any necessary packages are included in the script.
+    - pip_packages: A list of required pip packages for running the script.
+    - test_script: The script for testing the implemented function.
+    - docstring: Optional documentation string for the script.
+    Craft a clear and informative message that includes all the necessary details for the data engineer to proceed with implementing the Python function script.
+    """
+    return await role.aask(req, str)
+
         # async def test_run_python_function(role, client, service_id, python_function: PythonFunctionScript) -> PythonFunctionScript:
         #     """Test run the python function script."""
         #     if python_function.pip_packages:
@@ -238,10 +272,10 @@ def create_non_schema_team(investment):
             profile="Data Engineer",
             goal="Develop the python function script according to the software requirement `SoftwareRequirement`, ensuring that it fulfills the desired functionality. Implement necessary algorithms, handle data processing, and write tests to validate the correctness of the function. Save the python function script to the specified path.",
             constraints=None,
-            actions=[create_software_requirements],
+            actions=[develop_python_functions],
         )
-    non_schema_team.hire([ux_manager, project_manager, data_engineer])
-    return non_schema_team
+    # non_schema_team.hire([ux_manager, project_manager, data_engineer])
+    return ux_manager, project_manager, data_engineer
     
 async def schema_main():
     hub = create_schema_team(investment=0.5)
@@ -253,13 +287,20 @@ async def schema_main():
     await hub.handle(req)
 
 async def non_schema_main():
-    hub = create_non_schema_team(investment=0.5)
-    event_bus = hub.get_event_bus()
+    ux_manager, project_manager, data_engineer = create_non_schema_team(investment=0.5)
+    event_bus = ux_manager.get_event_bus()
+    event_bus.register_default_events()
+    event_bus = project_manager.get_event_bus()
+    event_bus.register_default_events()
+    event_bus = data_engineer.get_event_bus()
     event_bus.register_default_events()
     req = Message(
             content="create a tool for counting cells in microscopy images and save to /home/alalulu/workspace/schema-agents/scripts/schema_team.py",
             role="User")
-    await hub.handle(req)
+    responses1 = await ux_manager.handle(req)
+    responses2 = await project_manager.handle(responses1[0])
+    final_responses = await data_engineer.handle(responses2[0])
+    return final_responses[0]
     
 if __name__ == "__main__":
     asyncio.run(non_schema_main())
