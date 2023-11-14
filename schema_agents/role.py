@@ -263,7 +263,8 @@ class Role:
         if output_schema is str:
             output_types = []
             prompt = prompt or f"{prefix}"
-            messages.append({"role": "user", "content": f"{prompt}"})
+            if prompt:
+                messages.append({"role": "user", "content": f"{prompt}"})
         elif isinstance(output_schema, typing._UnionGenericAlias):
             output_types = list(output_schema.__args__)
             schema_names = ",".join([f"`{s.__name__}`" for s in output_types])
@@ -301,5 +302,3 @@ class Role:
             idx = [s.__name__ for s in output_types].index(response["name"])
             arguments = json.loads(response["arguments"])
             return output_types[idx].parse_obj(arguments)
-            
-        
