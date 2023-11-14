@@ -11,7 +11,7 @@ class MicroscopeControlRequirements(BaseModel):
     """Requirements for controlling the microscope and acquire images."""
     path: str = Field(default="", description="save images path")
     timeout: float = Field(default=0.0, description="timeout")
-    query: str = Field(default="", description="user's original request")
+    query: str = Field(default="", description="Original request from the user")
     plan: str = Field(default="", description="plan for control microscope and acquiring images")
 
 class MultiDimensionalAcquisitionScript(BaseModel):

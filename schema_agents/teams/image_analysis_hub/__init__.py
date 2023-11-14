@@ -22,7 +22,8 @@ async def clarify_user_request(client, user_query: str, role: Role) -> Union[Use
             "schema": config.form_schema and yaml.safe_load(config.form_schema),
             "ui_schema": config.ui_schema and yaml.safe_load(config.ui_schema),
             "submit_label": config.submit_label,
-        }
+        },
+        height="400px"
     )
     form = await fm.get_data()
     return UserClarification(user_query=user_query, form_data=str(form['formData']))
