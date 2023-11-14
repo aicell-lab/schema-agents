@@ -302,5 +302,3 @@ class Role:
             idx = [s.__name__ for s in output_types].index(response["name"])
             arguments = json.loads(response["arguments"])
             return output_types[idx].parse_obj(arguments)
-            
-        
