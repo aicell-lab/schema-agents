@@ -26,8 +26,8 @@ from schema_agents.utils.token_counter import (
     count_string_tokens,
     get_max_completion_tokens,
 )
-from schema_agents.utils.common import EventBus
-
+from schema_agents.utils.common import EventBus, current_session
+from contextvars import copy_context
 
 def retry(max_retries):
     def decorator(f):
@@ -137,11 +137,12 @@ class OpenAIGPTAPI(BaseGPTAPI, RateLimiter):
     """
     Check https://platform.openai.com/examples for examples
     """
-    def __init__(self, model=None, seed=None, temperature=None):
+    def __init__(self, model=None, seed=None, temperature=None, timeout=None):
         self.__init_openai(CONFIG)
         self.model = model or CONFIG.openai_api_model
-        self.temperature = temperature or CONFIG.openai_temperature
-        self.seed = seed or CONFIG.openai_seed
+        self.temperature = float(temperature or CONFIG.openai_temperature)
+        self.timeout = timeout or CONFIG.openai_timeout
+        self.seed = int(seed or CONFIG.openai_seed)
         self.auto_max_tokens = False
         self._cost_manager = CostManager()
         RateLimiter.__init__(self, rpm=self.rpm)
@@ -177,8 +178,8 @@ class OpenAIGPTAPI(BaseGPTAPI, RateLimiter):
         collected_messages = []
         function_call_detected = False
         func_call = {}
-        sid = ''.join(random.choices(string.ascii_lowercase + string.digits, k=8))
-        
+        query_id = ''.join(random.choices(string.ascii_lowercase + string.digits, k=8))
+        session_id = current_session.get() if current_session in copy_context() else None
         # iterate through the stream of events
         async for chunk in response:
             chunk = chunk.dict()
@@ -190,35 +191,27 @@ class OpenAIGPTAPI(BaseGPTAPI, RateLimiter):
                 if "name" in chunk_message["function_call"] and chunk_message["function_call"]["name"]:
                     func_call["name"] = chunk_message["function_call"]["name"]
                     if event_bus:
-                        event_bus.emit("stream", {"sid": sid, "type": "function_call", "name": func_call["name"], "arguments": func_call.get("arguments", ""), "status": "start"})
-                    # if not function_call_detected:
-                    #     print(func_call["name"] + "(", end="")
+                        event_bus.emit("stream", {"query_id": query_id, "session_id": session_id, "type": "function_call", "name": func_call["name"], "arguments": func_call.get("arguments", ""), "status": "start"})
                 if "arguments" in chunk_message["function_call"]:
                     if "arguments" not in func_call:
                         func_call["arguments"] = ""
                     func_call["arguments"] += chunk_message["function_call"]["arguments"]
-                    # print(chunk_message["function_call"]["arguments"], end="")
                 function_call_detected = True
             if event_bus:
                 if function_call_detected:
                     if chunk["choices"][0].get("finish_reason") in ["function_call", "stop"]:
                         event_bus.emit("function_call", func_call)
-                        event_bus.emit("stream", {"sid": sid, "type": "function_call", "name": func_call["name"], "arguments": func_call["arguments"], "status": "finished"})
-                    elif chunk_message["function_call"].get("arguments"):
-                        event_bus.emit("stream", {"sid": sid, "type": "function_call", "name": func_call["name"], "arguments": chunk_message["function_call"]["arguments"], "status": "in_progress"})
+                        event_bus.emit("stream", {"query_id": query_id, "session_id": session_id, "type": "function_call", "name": func_call["name"], "arguments": func_call["arguments"], "status": "finished"})
+                    elif "function_call" in chunk_message and chunk_message["function_call"].get("arguments"):
+                        event_bus.emit("stream", {"query_id": query_id, "session_id": session_id, "type": "function_call", "name": func_call["name"], "arguments": chunk_message["function_call"]["arguments"], "status": "in_progress"})
                 elif "content" in chunk_message and chunk_message["content"]:
-                    event_bus.emit("stream", {"sid": sid, "type": "text", "content": chunk_message["content"]})
+                    event_bus.emit("stream", {"query_id": query_id, "session_id": session_id, "type": "text", "content": chunk_message["content"]})
 
-        # if function_call_detected:
-        #     print(")", end="")
-        # print()
-        
         if function_call_detected:
             full_reply_content = func_call
-            # TODO: check if the usage calculation is correct
             usage = self._calc_usage(messages, f"{func_call['name']}({func_call['arguments']})", functions=kwargs.get("functions", None))
         else:
-            full_reply_content = ''.join([m.get('content', '') for m in collected_messages])
+            full_reply_content = ''.join([m.get('content', '') for m in collected_messages if m.get('content')])
             usage = self._calc_usage(messages, full_reply_content, functions=kwargs.get("functions", None))
         self._update_costs(usage)
         if event_bus:
@@ -233,7 +226,7 @@ class OpenAIGPTAPI(BaseGPTAPI, RateLimiter):
             "n": 1,
             "stop": None,
             "temperature": self.temperature,
-            "timeout": 3,
+            "timeout": self.timeout,
             "seed": self.seed,
         }
         if CONFIG.openai_api_type == "azure":

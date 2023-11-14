@@ -22,8 +22,16 @@ from schema_agents.schema import Message
 from schema_agents.memory.long_term_memory import LongTermMemory
 from schema_agents.utils.common import EventBus
 from pydantic import BaseModel
+from schema_agents.utils.common import current_session
+from contextlib import asynccontextmanager
+from contextvars import copy_context
 
 PREFIX_TEMPLATE = """You are a {profile}, named {name}, your goal is {goal}, and the constraint is {constraints}. """
+
+@asynccontextmanager
+async def create_session_context(session_id):
+    current_session.set(session_id)
+    yield copy_context()
 
 class RoleSetting(BaseModel):
     """Role setting"""
@@ -42,8 +50,8 @@ class RoleSetting(BaseModel):
 
 class Role:
     """Role is a person or group who has a specific job or purpose within an organization."""
-    def __init__(self, name="", profile="", goal="", constraints=None, desc="", long_term_memory: Optional[LongTermMemory]=None, event_bus:EventBus =None, actions: list[Callable] = None, model: str=None):
-        self._llm = LLM(model=model)
+    def __init__(self, name="", profile="", goal="", constraints=None, desc="", long_term_memory: Optional[LongTermMemory]=None, event_bus:EventBus =None, actions: list[Callable] = None, **kwargs):
+        self._llm = LLM(**kwargs)
         self._setting = RoleSetting(name=name, profile=profile, goal=goal, constraints=constraints, desc=desc)
         self._states = []
         self._actions = actions or []
@@ -52,7 +60,7 @@ class Role:
         self._output_schemas = []
         self._action_index = {}
         self._user_support_actions = []
-        self._watch_actions = set()
+        self._watch_schemas = set()
         self.long_term_memory = long_term_memory
         if event_bus:
             self.set_event_bus(event_bus)
@@ -65,19 +73,21 @@ class Role:
         self._actions = []
 
 
-    def _watch(self, actions: Iterable[Union[str, BaseModel]]):
+    def _watch(self, schemas: Iterable[Union[str, BaseModel]]):
         """Watch actions."""
-        self._watch_actions.update(actions)
+        self._watch_schemas.update(schemas)
     
     def set_event_bus(self, event_bus: EventBus):
         """Set event bus."""
         self._event_bus = event_bus
 
         async def handle_message(msg):
-            if msg.data and type(msg.data) in self._watch_actions:
-                await self.handle(msg)
-            elif msg.data is None and str in self._watch_actions:
-                await self.handle(msg)
+            if msg.data and type(msg.data) in self._watch_schemas:
+                if msg.cause_by not in self._action_index[type(msg.data)]:
+                    await self.handle(msg)
+            elif msg.data is None and str in self._watch_schemas:
+                if msg.cause_by not in self._action_index[str]:
+                    await self.handle(msg)
 
         self._event_bus.on("message", handle_message)
         logger.info(f"Mounting {self._setting} to event bus: {self._event_bus.name}.")
@@ -168,17 +178,17 @@ class Role:
         return False
     
     # @retry(stop=stop_after_attempt(2), wait=wait_fixed(1))
-    async def handle(self, msg: Union[str, Message]) -> list[Message]:
+    async def handle(self, msg: Union[str, Message], session_id=None) -> list[Message]:
         """Handle message"""
         if isinstance(msg, str):
             msg = Message(role="User", content=msg)
         if not self.can_handle(msg):
             raise ValueError(f"Invalid message, the role {self._setting} cannot handle the message: {msg}")
-        session_id = str(uuid.uuid4())
-        msg.session_ids.append(session_id)
+        _session_id = str(uuid.uuid4())
+        msg.session_ids.append(_session_id)
         messages = []
         def on_message(new_msg):
-            if session_id in new_msg.session_ids:
+            if _session_id in new_msg.session_ids:
                 messages.append(new_msg)
 
         self._event_bus.on("message", on_message)
@@ -189,7 +199,11 @@ class Role:
                 actions = self._action_index[context_class]
                 for action in actions:
                     responses.append(self._run_action(action, msg))
-            responses = await asyncio.gather(*responses)
+            if session_id:
+                async with create_session_context(session_id):
+                    responses = await asyncio.gather(*responses)
+            else:
+                responses = await asyncio.gather(*responses)
             outputs = []  
             for response in responses:
                 if not response:
@@ -204,7 +218,11 @@ class Role:
                 # self._rc.memory.add(output)
                 # logger.debug(f"{response}")
                 outputs.append(output)
-                await self._event_bus.aemit("message", output)
+                if session_id:
+                    async with create_session_context(session_id):
+                        await self._event_bus.aemit("message", output)
+                else:
+                    await self._event_bus.aemit("message", output)
         finally:
             self._event_bus.off("message", on_message)
         return messages
@@ -212,41 +230,41 @@ class Role:
     # @retry(stop=stop_after_attempt(2), wait=wait_fixed(1))
     async def aask(self, req, output_schema=None, prompt=None):
         output_schema = output_schema or str
+        input_schema = []
         if isinstance(req, str):
             messages = [{"role": "user", "content": req}]
-            input_schema = None
         elif isinstance(req, dict):
             messages = [req]
-            input_schema = None
         elif isinstance(req, BaseModel):
-            input_schema = req.__class__
-            messages = [{"role": "function", "name": input_schema.__name__, "content": req.json()}]
+            input_schema.append(req.__class__)
+            messages = [{"role": "function", "name": req.__class__.__name__, "content": req.json()}]
         else:
             assert isinstance(req, list)
             messages = []
             for r in req:
                 if isinstance(r, str):
                     messages.append({"role": "user", "content": r})
-                    input_schema = None
                 elif isinstance(r, dict):
                     messages.append(r)
-                    input_schema = None
                 elif isinstance(r, BaseModel):
-                    input_schema = r.__class__
-                    messages.append({"role": "function", "name": input_schema.__name__, "content": r.json()})
+                    input_schema.append(r.__class__)
+                    messages.append({"role": "function", "name": r.__class__.__name__, "content": r.json()})
                 else:
                     raise ValueError(f"Invalid request {r}")
         
         assert output_schema is str or isinstance(output_schema, typing._UnionGenericAlias) or issubclass(output_schema, BaseModel)
         
         if input_schema:
-            prefix = f"Please generate a response based on the result of `{input_schema.__name__}`. "
+            sch = ",".join([f"`{i.__name__}`" for i in input_schema])
+            prefix = f"Please generate a response based on results from: {sch}. "
         else:
             prefix = ""
+
         if output_schema is str:
             output_types = []
             prompt = prompt or f"{prefix}"
-            messages.append({"role": "user", "content": f"{prompt}"})
+            if prompt:
+                messages.append({"role": "user", "content": f"{prompt}"})
         elif isinstance(output_schema, typing._UnionGenericAlias):
             output_types = list(output_schema.__args__)
             schema_names = ",".join([f"`{s.__name__}`" for s in output_types])
@@ -260,9 +278,9 @@ class Role:
         
         if output_schema is str:
             function_call = "none"
-            return await self._llm.aask(messages, system_msgs, functions=[input_schema] if input_schema else [], function_call=function_call, event_bus=self._event_bus)
+            return await self._llm.aask(messages, system_msgs, functions=input_schema, function_call=function_call, event_bus=self._event_bus)
 
-        functions = [schema_to_function(s) for s in set(output_types + ([input_schema] if input_schema else []))]
+        functions = [schema_to_function(s) for s in set(output_types + input_schema)]
         if len(output_types) == 1:
             function_call = {"name": output_types[0].__name__}
         else:
@@ -284,5 +302,3 @@ class Role:
             idx = [s.__name__ for s in output_types].index(response["name"])
             arguments = json.loads(response["arguments"])
             return output_types[idx].parse_obj(arguments)
-            
-        

@@ -13,6 +13,8 @@ from math import ceil
 
 TOKEN_COSTS = {
     "gpt-3.5-turbo": {"prompt": 0.0015, "completion": 0.002},
+    "gpt-3.5-turbo-instruct": {"prompt": 0.0015, "completion": 0.002},
+    "gpt-3.5-turbo-1106": {"prompt": 0.0010, "completion": 0.002},
     "gpt-3.5-turbo-0301": {"prompt": 0.0015, "completion": 0.002},
     "gpt-3.5-turbo-0613": {"prompt": 0.0015, "completion": 0.002},
     "gpt-3.5-turbo-16k": {"prompt": 0.003, "completion": 0.004},
@@ -30,6 +32,8 @@ TOKEN_COSTS = {
 
 TOKEN_MAX = {
     "gpt-3.5-turbo": 4096,
+    "gpt-3.5-turbo-instruct": 4096,
+    "gpt-3.5-turbo-1106": 16384,
     "gpt-3.5-turbo-0301": 4096,
     "gpt-3.5-turbo-0613": 4096,
     "gpt-3.5-turbo-16k": 16384,
@@ -95,6 +99,8 @@ def count_message_tokens(messages, model="gpt-3.5-turbo-0613", functions=None):
         print("Warning: model not found. Using cl100k_base encoding.")
         encoding = tiktoken.get_encoding("cl100k_base")
     if model in {
+        "gpt-3.5-turbo-instruct",
+        "gpt-3.5-turbo-1106",
         "gpt-3.5-turbo-0613",
         "gpt-3.5-turbo-16k-0613",
         "gpt-4-0314",
