@@ -50,8 +50,8 @@ class RoleSetting(BaseModel):
 
 class Role:
     """Role is a person or group who has a specific job or purpose within an organization."""
-    def __init__(self, name="", profile="", goal="", constraints=None, desc="", long_term_memory: Optional[LongTermMemory]=None, event_bus:EventBus =None, actions: list[Callable] = None, model: str=None):
-        self._llm = LLM(model=model)
+    def __init__(self, name="", profile="", goal="", constraints=None, desc="", long_term_memory: Optional[LongTermMemory]=None, event_bus:EventBus =None, actions: list[Callable] = None, **kwargs):
+        self._llm = LLM(**kwargs)
         self._setting = RoleSetting(name=name, profile=profile, goal=goal, constraints=constraints, desc=desc)
         self._states = []
         self._actions = actions or []
