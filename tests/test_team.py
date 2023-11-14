@@ -15,6 +15,7 @@ class AnalysisScript(BaseModel):
     """Python script for image analysis."""
     script: str = Field(description="Python script for image analysis")
 
+
 @pytest.mark.asyncio
 async def test_team():
     async def create_user_requirements(query: str, role: Role) -> SoftwareRequirementDocument:
