@@ -20,46 +20,43 @@ async def chat(msg, client, context=None):
     #     raise Exception(f"Sorry, you (user: {context['user']}) are not authorized to use this service.")
     conversation_id = str(uuid.uuid4())
     session_id = conversation_id or secrets.token_hex(8)
-    message_id = str(uuid.uuid4())
+    message_context = {"parent_id": msg.messageId}
     if client:
         await client.initialize({"conversationId": conversation_id })
-        await client.showMessage("hypha bot joined the workspace")
-        # await client.executeScript({"script": query})
-        # dialog = await client.createWindow(src="https://kaibu.org/#/app")
-        # await dialog.view_image("https://images.proteinatlas.org/61448/1319_C10_2_blue_red_green.jpg")
-        await client.newMessage({
-            "messageId": message_id,
-            "parentMessageId": msg.messageId,
-            "sender": "ChatGPT",
-            "text": "",
-            "submitting": False,
-        })
+        await client.showMessage("Hey, I am on it! 👩‍💻")
 
-    # async def message_callback(message):
-    #     if message.data:
-    #         content = dict_to_md(message.data.dict())
-    #     else:
-    #         content = message.content
-    #     text = f"# 🧑{message.role}\n\n{content}\n **💰{CONFIG.total_cost:.4f} / {CONFIG.max_budget:.4f}**\n"
-    #     if client:
-    #         await client.appendText({"messageId": message_id, "text": text})
-    
+    async def create_new_message(name, query_id):
+        message_context[query_id] = str(uuid.uuid4())
+        promise = client.newMessage({
+            "messageId": message_context[query_id],
+            "parentMessageId": message_context["parent_id"],
+            "sender": "ChatGPT",
+            "text": f"\n\n## Generating response for {name}\n```json\n",
+            "submitting": True,
+        })
+        # update parent
+        message_context["parent_id"] = message_context[query_id]
+        await promise
+
     async def stream_callback(message):
         if message["session_id"] == session_id or not client:
             return
         if message["type"] == "function_call":
             if message["status"] == "start":
-                await client.appendText({"messageId": message_id, "text": f"\n\n## Generating response for {message['name']}\n```json\n"})
+                await create_new_message(message["name"], message["query_id"])
+                # await client.appendText({"messageId": message_context[message["query_id"]], "text": f"\n\n## Generating response for {message['name']}\n```json\n"})
             elif message["status"] == "in_progress":
-                await client.appendText({"messageId": message_id, "text": message["arguments"].replace("\\n", "\n")})
+                await client.appendText({"messageId": message_context[message["query_id"]], "text": message["arguments"].replace("\\n", "\n")})
                 # print(message["arguments"], end="")
             elif message["status"] == "finished":
-                await client.appendText({"messageId": message_id, "text": "\n```\n\n"})
+                await client.appendText({"messageId": message_context[message["query_id"]], "text": "\n```\n\n", "submitting": False})
             # else:
                 # print(f'\nGenerating {message["name"]} ({message["status"]}): {message["arguments"]}')
         elif message["type"] == "text":
+            if not message_context.get(message["query_id"]):
+                await create_new_message(message["name"], message["query_id"])
             # print(message["content"], end="")
-            await client.appendText({"messageId": message_id, "text": message["arguments"]})
+            await client.appendText({"messageId": message_context[message["query_id"]], "text": message["arguments"]})
             
 
     hub = create_image_analysis_hub(client=client, investment=0.5)
@@ -123,7 +120,7 @@ async def main():
         "ping": lambda context: "pong",
     }, overwrite=True)
     svc = await server.get_service(service_id)
-    url = f"https://chat.aicell.io/#/chat/new?service-id={svc.id}"
+    url = f"http://localhost:3090/#/chat/new?service-id={svc.id}"
     print(f"Hypha bot is ready!\nYou can connect via {url}")
 
 if __name__ == "__main__":
