@@ -18,7 +18,7 @@ from schema_agents.logs import logger
 from schema_agents.utils import (parse_special_json,
                               schema_to_function)
 from schema_agents.llm import LLM
-from schema_agents.schema import Message
+from schema_agents.schema import Message, RoleSetting, Session
 from schema_agents.memory.long_term_memory import LongTermMemory
 from schema_agents.utils.common import EventBus
 from pydantic import BaseModel
@@ -28,31 +28,21 @@ from contextvars import copy_context
 
 PREFIX_TEMPLATE = """You are a {profile}, named {name}, your goal is {goal}, and the constraint is {constraints}. """
 
+
 @asynccontextmanager
-async def create_session_context(session_id):
-    current_session.set(session_id)
+async def create_session_context(id=None, role_setting=None):
+    pre_session = current_session.get()
+    if pre_session:
+        id = id or pre_session.id
+        role_setting = role_setting or pre_session.role_setting
+    current_session.set(Session(id=id, role_setting=role_setting))
     yield copy_context()
-
-class RoleSetting(BaseModel):
-    """Role setting"""
-    name: str
-    profile: str
-    goal: str
-    constraints: Optional[str]
-    desc: str
-
-    def __str__(self):
-        return f"{self.name}({self.profile})"
-
-    def __repr__(self):
-        return self.__str__()
-
-
+    current_session.set(pre_session)
 class Role:
     """Role is a person or group who has a specific job or purpose within an organization."""
-    def __init__(self, name="", profile="", goal="", constraints=None, desc="", long_term_memory: Optional[LongTermMemory]=None, event_bus:EventBus =None, actions: list[Callable] = None, **kwargs):
+    def __init__(self, name="", profile="", goal="", constraints=None, desc="", icon="🤖", long_term_memory: Optional[LongTermMemory]=None, event_bus:EventBus =None, actions: list[Callable] = None, **kwargs):
         self._llm = LLM(**kwargs)
-        self._setting = RoleSetting(name=name, profile=profile, goal=goal, constraints=constraints, desc=desc)
+        self._setting = RoleSetting(name=name, profile=profile, goal=goal, constraints=constraints, desc=desc, icon=icon)
         self._states = []
         self._actions = actions or []
         self._role_id = str(self._setting)
@@ -178,17 +168,17 @@ class Role:
         return False
     
     # @retry(stop=stop_after_attempt(2), wait=wait_fixed(1))
-    async def handle(self, msg: Union[str, Message], session_id=None) -> list[Message]:
+    async def handle(self, msg: Union[str, Message]) -> list[Message]:
         """Handle message"""
         if isinstance(msg, str):
             msg = Message(role="User", content=msg)
         if not self.can_handle(msg):
             raise ValueError(f"Invalid message, the role {self._setting} cannot handle the message: {msg}")
-        _session_id = str(uuid.uuid4())
-        msg.session_ids.append(_session_id)
+        _session_id = msg.session_id or str(uuid.uuid4())
+        msg.session_history.append(_session_id)
         messages = []
         def on_message(new_msg):
-            if _session_id in new_msg.session_ids:
+            if _session_id in new_msg.session_history:
                 messages.append(new_msg)
 
         self._event_bus.on("message", on_message)
@@ -199,29 +189,24 @@ class Role:
                 actions = self._action_index[context_class]
                 for action in actions:
                     responses.append(self._run_action(action, msg))
-            if session_id:
-                async with create_session_context(session_id):
-                    responses = await asyncio.gather(*responses)
-            else:
+            async with create_session_context(id=msg.session_id, role_setting=self._setting):
                 responses = await asyncio.gather(*responses)
+
             outputs = []  
             for response in responses:
                 if not response:
                     continue
                 # logger.info(response)
                 if isinstance(response, str):
-                    output = Message(content=response, role=self.profile, cause_by=action, session_ids=msg.session_ids.copy())
+                    output = Message(content=response, role=self.profile, cause_by=action, session_history=msg.session_history.copy())
                 else:
                     assert isinstance(response, BaseModel), f"Action must return pydantic BaseModel, but got {response}"
-                    output = Message(content=response.json(), data=response, session_ids=msg.session_ids.copy(),
+                    output = Message(content=response.json(), data=response, session_history=msg.session_history.copy(),
                                 role=self.profile, cause_by=action)
                 # self._rc.memory.add(output)
                 # logger.debug(f"{response}")
                 outputs.append(output)
-                if session_id:
-                    async with create_session_context(session_id):
-                        await self._event_bus.aemit("message", output)
-                else:
+                async with create_session_context(id=msg.session_id, role_setting=self._setting):
                     await self._event_bus.aemit("message", output)
         finally:
             self._event_bus.off("message", on_message)
