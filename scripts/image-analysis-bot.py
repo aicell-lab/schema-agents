@@ -5,8 +5,7 @@ import asyncio
 import secrets
 from pydantic import BaseModel
 from imjoy_rpc.hypha import connect_to_server, login
-from schema_agents.utils import dict_to_md
-from schema_agents.config import CONFIG
+from schema_agents.schema import Message
 from schema_agents.teams.image_analysis_hub import create_image_analysis_hub
 import logging
 from schema_agents.tools.code_interpreter import create_mock_client
@@ -25,13 +24,14 @@ async def chat(msg, client, context=None):
         await client.initialize({"conversationId": conversation_id })
         await client.showMessage("Hey, I am on it! 👩‍💻")
 
-    async def create_new_message(name, query_id):
+    async def create_new_message(name, query_id, role_setting):
         message_context[query_id] = str(uuid.uuid4())
         promise = client.newMessage({
             "messageId": message_context[query_id],
             "parentMessageId": message_context["parent_id"],
             "sender": "ChatGPT",
-            "text": f"\n\n## Generating response for {name}\n```json\n",
+            "icon": role_setting.icon,
+            "text": f"\n\n# {role_setting.name}({role_setting.profile})\n## Generating response for {name}\n```json\n",
             "submitting": True,
         })
         # update parent
@@ -39,32 +39,27 @@ async def chat(msg, client, context=None):
         await promise
 
     async def stream_callback(message):
-        if message["session_id"] == session_id or not client:
+        session = message.session
+        if session.id != session_id or not client:
             return
-        if message["type"] == "function_call":
-            if message["status"] == "start":
-                await create_new_message(message["name"], message["query_id"])
-                # await client.appendText({"messageId": message_context[message["query_id"]], "text": f"\n\n## Generating response for {message['name']}\n```json\n"})
-            elif message["status"] == "in_progress":
-                await client.appendText({"messageId": message_context[message["query_id"]], "text": message["arguments"].replace("\\n", "\n")})
-                # print(message["arguments"], end="")
-            elif message["status"] == "finished":
-                await client.appendText({"messageId": message_context[message["query_id"]], "text": "\n```\n\n", "submitting": False})
-            # else:
-                # print(f'\nGenerating {message["name"]} ({message["status"]}): {message["arguments"]}')
-        elif message["type"] == "text":
-            if not message_context.get(message["query_id"]):
-                await create_new_message(message["name"], message["query_id"])
-            # print(message["content"], end="")
-            await client.appendText({"messageId": message_context[message["query_id"]], "text": message["arguments"]})
-            
+        if message.type == "function_call":
+            if message.status == "start":
+                await create_new_message(message.name, message.query_id, session.role_setting)
+            elif message.status == "in_progress":
+                await client.appendText({"messageId": message_context[message.query_id], "text": message.arguments.replace("\\n", "\n")})
+            elif message.status == "finished":
+                await client.appendText({"messageId": message_context[message.query_id], "text": "\n```\n\n", "submitting": False})
+        elif message.type == "text":
+            if not message_context.get(message.query_id):
+                await create_new_message(message.name, message.query_id, session.role_setting)
+            await client.appendText({"messageId": message_context[message.query_id], "text": message.arguments})
 
     hub = create_image_analysis_hub(client=client, investment=0.5)
     event_bus = hub.get_event_bus()
     event_bus.register_default_events()
     # event_bus.on("message", message_callback)
     event_bus.on("stream", stream_callback)
-    await hub.handle(msg.text)
+    await hub.handle(Message(role="User", content=msg.text, session_id=session_id))
 
 async def test_chat():
     client = create_mock_client(form_data={

@@ -58,13 +58,13 @@ def create_image_analysis_hub(client, investment):
 
     web_developer  = create_web_developer(client=client)
     data_engineer = create_data_engineer(client=client)
-    devops = Role(name="Bruce",
-                profile="DevOps",
-                goal="Deploy the software to the cloud and make it available to the user.",
-                constraints=None,
-                actions=[deploy_app])  
+    # devops = Role(name="Bruce",
+    #             profile="DevOps",
+    #             goal="Deploy the software to the cloud and make it available to the user.",
+    #             constraints=None,
+    #             actions=[deploy_app])  
     
-    microscopist = create_microscopist(client=client)
+    # microscopist = create_microscopist(client=client)
     
-    team.hire([ux_manager, project_manager, web_developer, data_engineer, devops, microscopist])
+    team.hire([ux_manager, project_manager, web_developer, data_engineer])
     return team

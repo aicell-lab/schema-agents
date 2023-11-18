@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TypedDict, Callable
+from typing import Optional, TypedDict, Callable
 
 from pydantic import BaseModel
 
@@ -28,7 +28,8 @@ class Message:
     role: str = field(default='user')  # system / user / assistant
     cause_by: Callable = field(default=None)
     processed_by: set['Role'] = field(default_factory=set)
-    session_ids: list[str] = field(default_factory=list)
+    session_id: str = field(default=None)
+    session_history: list[str] = field(default_factory=list)
 
     def __str__(self):
         return f"{self.role}: {self.content}"
@@ -81,6 +82,36 @@ class MemoryChunk:
         return {
             "index": self.index
         }
+
+class RoleSetting(BaseModel):
+    """Role setting"""
+    name: str
+    profile: str
+    goal: str
+    desc: str
+    constraints: Optional[str] = ""
+    icon: Optional[str] = None
+
+    def __str__(self):
+        return f"{self.name}({self.profile})"
+
+    def __repr__(self):
+        return self.__str__()
+
+
+class Session(BaseModel):
+    id: Optional[str] = None
+    role_setting: Optional[RoleSetting] = None
+
+
+class StreamEvent(BaseModel):
+    type: str
+    query_id: str
+    session: Session
+    status: str
+    content: Optional[str] = None
+    name: Optional[str] = None
+    arguments: Optional[str] = None
 
 
 if __name__ == '__main__':

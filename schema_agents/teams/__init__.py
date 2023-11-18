@@ -65,12 +65,12 @@ class Team(Role):
             message = Message(role="User", content=message)
         if not self.can_handle(message):
             raise ValueError(f"Team {self.name} can't handle message: {message}")
-        session_id = str(uuid.uuid4())
-        message.session_ids.append(session_id)
+        _session_id = message.session_id or str(uuid.uuid4())
+        message.session_history.append(_session_id)
         messages = []
         def on_message(new_msg):
             self._check_balance()
-            if session_id in new_msg.session_ids:
+            if _session_id in new_msg.session_history:
                 messages.append(new_msg)
 
         self._event_bus.on("message", on_message)

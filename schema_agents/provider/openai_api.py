@@ -27,6 +27,7 @@ from schema_agents.utils.token_counter import (
     get_max_completion_tokens,
 )
 from schema_agents.utils.common import EventBus, current_session
+from schema_agents.schema import StreamEvent
 from contextvars import copy_context
 
 def retry(max_retries):
@@ -179,7 +180,7 @@ class OpenAIGPTAPI(BaseGPTAPI, RateLimiter):
         function_call_detected = False
         func_call = {}
         query_id = ''.join(random.choices(string.ascii_lowercase + string.digits, k=8))
-        session_id = current_session.get() if current_session in copy_context() else None
+        session = current_session.get() if current_session in copy_context() else None
         # iterate through the stream of events
         async for chunk in response:
             chunk = chunk.dict()
@@ -191,7 +192,7 @@ class OpenAIGPTAPI(BaseGPTAPI, RateLimiter):
                 if "name" in chunk_message["function_call"] and chunk_message["function_call"]["name"]:
                     func_call["name"] = chunk_message["function_call"]["name"]
                     if event_bus:
-                        event_bus.emit("stream", {"query_id": query_id, "session_id": session_id, "type": "function_call", "name": func_call["name"], "arguments": func_call.get("arguments", ""), "status": "start"})
+                        event_bus.emit("stream", StreamEvent(type="function_call", query_id=query_id, session=session, name=func_call["name"], arguments=func_call.get("arguments", ""), status="start"))
                 if "arguments" in chunk_message["function_call"]:
                     if "arguments" not in func_call:
                         func_call["arguments"] = ""
@@ -201,12 +202,11 @@ class OpenAIGPTAPI(BaseGPTAPI, RateLimiter):
                 if function_call_detected:
                     if chunk["choices"][0].get("finish_reason") in ["function_call", "stop"]:
                         event_bus.emit("function_call", func_call)
-                        event_bus.emit("stream", {"query_id": query_id, "session_id": session_id, "type": "function_call", "name": func_call["name"], "arguments": func_call["arguments"], "status": "finished"})
+                        event_bus.emit("stream", StreamEvent(type="function_call", query_id=query_id, session=session, name=func_call["name"], arguments=func_call["arguments"], status="finished"))
                     elif "function_call" in chunk_message and chunk_message["function_call"].get("arguments"):
-                        event_bus.emit("stream", {"query_id": query_id, "session_id": session_id, "type": "function_call", "name": func_call["name"], "arguments": chunk_message["function_call"]["arguments"], "status": "in_progress"})
+                        event_bus.emit("stream", StreamEvent(type="function_call", query_id=query_id, session=session, name=func_call["name"], arguments=chunk_message["function_call"]["arguments"], status="in_progress"))
                 elif "content" in chunk_message and chunk_message["content"]:
-                    event_bus.emit("stream", {"query_id": query_id, "session_id": session_id, "type": "text", "content": chunk_message["content"]})
-
+                    event_bus.emit("stream", StreamEvent(type="text", query_id=query_id, session=session, content=chunk_message["content"], status="in_progress"))
         if function_call_detected:
             full_reply_content = func_call
             usage = self._calc_usage(messages, f"{func_call['name']}({func_call['arguments']})", functions=kwargs.get("functions", None))
