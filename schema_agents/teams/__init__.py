@@ -27,6 +27,7 @@ class Team(Role):
 
     def hire(self, roles: list[Role]):
         """Hire roles to cooperate"""
+        roles = list(set(roles))
         for role in roles:
             role.set_event_bus(self._event_bus)
         self._roles.extend(roles)

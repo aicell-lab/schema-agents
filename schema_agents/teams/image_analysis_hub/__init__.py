@@ -66,5 +66,5 @@ def create_image_analysis_hub(client, investment):
     
     microscopist = create_microscopist(client=client)
     
-    team.hire([ux_manager, project_manager, web_developer, data_engineer, web_developer, devops, microscopist])
+    team.hire([ux_manager, project_manager, web_developer, data_engineer, devops, microscopist])
     return team
