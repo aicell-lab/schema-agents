@@ -277,16 +277,16 @@ def create_non_schema_team(investment):
     # non_schema_team.hire([ux_manager, project_manager, data_engineer])
     return ux_manager, project_manager, data_engineer
     
-async def schema_main():
+async def schema_main(query="create a tool for counting cells in microscopy images and save to /home/alalulu/workspace/schema-agents/scripts/schema_team.py"):
     hub = create_schema_team(investment=0.5)
     event_bus = hub.get_event_bus()
     event_bus.register_default_events()
     req = Message(
-            content="create a tool for counting cells in microscopy images and save to /home/alalulu/workspace/schema-agents/scripts/schema_team.py",
+            content=query,
             role="User")
     await hub.handle(req)
 
-async def non_schema_main():
+async def non_schema_main(query="create a tool for counting cells in microscopy images and save to /home/alalulu/workspace/schema-agents/scripts/schema_team.py"):
     ux_manager, project_manager, data_engineer = create_non_schema_team(investment=0.5)
     event_bus = ux_manager.get_event_bus()
     event_bus.register_default_events()
@@ -295,7 +295,7 @@ async def non_schema_main():
     event_bus = data_engineer.get_event_bus()
     event_bus.register_default_events()
     req = Message(
-            content="create a tool for counting cells in microscopy images and save to /home/alalulu/workspace/schema-agents/scripts/schema_team.py",
+            content=query,
             role="User")
     responses1 = await ux_manager.handle(req)
     responses2 = await project_manager.handle(responses1[0])
@@ -303,4 +303,5 @@ async def non_schema_main():
     return final_responses[0]
     
 if __name__ == "__main__":
-    asyncio.run(non_schema_main())
+    query = "create a tool for counting cells in microscopy images and save to /home/alalulu/workspace/schema-agents/scripts/schema_team.py"
+    asyncio.run(non_schema_main(query))

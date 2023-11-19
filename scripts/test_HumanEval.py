@@ -2,6 +2,8 @@
 import random
 import os
 import json
+import asyncio
+from itertools import zip_longest
 from typing import List, Union, Optional, Dict, Any
 
 from pydantic import BaseModel, Field
@@ -19,32 +21,6 @@ class PythonOutput(BaseModel):
     function_script: str = Field(..., description="Completed python function script. This script should be able to pass the test cases. Includes imports, function definition, logic, and implementation.")
     docstring: Optional[str] = Field(None, description="Brief notes for usage, debugging, potential error fixing, and further improvements.")
    
-
-
-
-# async def test_run_python_function(
-#     role, client, service_id, python_function: PythonFunctionScript
-# ) -> PythonFunctionScript:
-#     """Test run the python function script."""
-#     if python_function.pip_packages:
-#         packages = ",".join([f"'{p}'" for p in python_function.pip_packages])
-#         results = await client.executeScript({"script": INSTALL_SCRIPT.format(packages=packages)})
-#         output_summary = json.dumps(
-#             {k: results[k] for k in results.keys() if results[k]}, indent=1
-#         )
-#         if results["status"] != "ok":
-#             raise RuntimeError(f"Failed to install pip packages: {python_function.pip_packages}, error: {output_summary}")
-#     results = await client.executeScript(
-#         {"script": python_function.function_script + "\n" + python_function.test_script}
-#     )
-    # if results["status"] != "ok":
-    #     output_summary = json.dumps(
-    #         {k: results[k] for k in results.keys() if results[k]}, indent=1
-    #     )
-        # python_function = await fix_code(role, client, python_function, output_summary)
-        # return await test_run_python_function(role, client, service_id, python_function)
-    # return python_function
-
 
 
 async def generate_code(
@@ -71,28 +47,6 @@ async def develop_python_functions(
 
     return func
 
-
-
-async def main():
-    # Your existing code...
-
-    problems = read_problems()
-    test_path = "/home/alalulu/workspace/schema-agents/tests/data"
-    
-    selected_problems = dict(random.sample(problems.items(), 20))
-    write_jsonl(os.path.join(test_path, "selected_problems.jsonl.gz"), selected_problems.values())
-    
-    sub_problem = read_problems(os.path.join(test_path, "selected_problems.jsonl.gz"))
-
-    num_samples_per_task = 1
-    samples = await asyncio.gather(*[
-        generate_sample(task_id, sub_problem[task_id]["prompt"], num_samples_per_task)
-        for task_id in sub_problem
-    ])
-
-    write_jsonl(os.path.join(test_path, "samples.jsonl"), samples)
-    await evaluate_functional_correctness("/home/alalulu/workspace/schema-agents/tests/data/samples.jsonl", [1], problem_file=os.path.join(test_path, "selected_problems.jsonl.gz"))
-
 async def generate_sample(task_id, prompt, num_samples):
     data_engineer = Role(
         name="Alice",
@@ -111,17 +65,50 @@ async def generate_sample(task_id, prompt, num_samples):
         "task_id": task_id,
         "completion": await generate_one_completion(prompt)
     }
-if __name__ == "__main__":
-    # test_path = "/home/alalulu/workspace/schema-agents/tests/data"
+
+async def main():
     
-    # import asyncio
-    # asyncio.run(main())
     problems = read_problems()
+    test_path = "./data/HumanEval"
+    selected_problems = {}
+    # selected_problems = dict(random.sample(problems.items(), 100))
+    def grouper(iterable, n, fillvalue=None):
+        args = [iter(iterable)] * n
+        return zip_longest(*args, fillvalue=fillvalue)
+    
+    for key, value in problems.items():
+        # Extract the numeric part of the key
+        key_number = int(key.split('/')[1])
+        # Check if the numeric part is between 0 and 100 (inclusive)
+        if 160 <= key_number <= 164:
+            selected_problems[key] = value
+    # write_jsonl(os.path.join(test_path, "selected_problems.jsonl.gz"), selected_problems.values())
+    # sub_problem = read_problems(os.path.join(test_path, "selected_problems.jsonl.gz"))
+    problem_set_chunks = grouper(selected_problems.items(), 5)
+    
+    num_samples_per_task = 10
+    for chunk in problem_set_chunks:
+        # remove None values in the chunk
+        chunk = [x for x in chunk if x is not None]
+        chunk = {k: v for k, v in chunk}
+        samples = await asyncio.gather(*[
+            generate_sample(task_id, chunk[task_id]["prompt"], num_samples_per_task)
+            for task_id in chunk
+        ])
+        write_jsonl(os.path.join(test_path, f"iteration{num_samples_per_task}_samples.jsonl"), samples, append=True)
+    # await evaluate_functional_correctness("/home/alalulu/workspace/schema-agents/tests/data/samples.jsonl", [1], problem_file=os.path.join(test_path, "selected_problems.jsonl.gz"))
+
+
+if __name__ == "__main__":
+    # asyncio.run(main())
+    test_path = "./data/HumanEval"
+    problems = read_problems()
+    write_jsonl(os.path.join(test_path, "problems.jsonl.gz"), problems.values())
     def check_correctness():
         # Importing multiprocessing only when this function is called
         import multiprocessing
         manager = multiprocessing.Manager()
-        test_path = "/home/alalulu/workspace/schema-agents/tests/data"
+        
         # human_path = "/home/alalulu/workspace/human-eval/data"
-        print(evaluate_functional_correctness(os.path.join(test_path,"samples.jsonl"), [1], problem_file=os.path.join(test_path, "selected_problems.jsonl.gz")))
+        print(evaluate_functional_correctness(os.path.join(test_path,"iteration10_samples.jsonl"), [1], problem_file=os.path.join(test_path, "problems.jsonl.gz")))
     check_correctness()
