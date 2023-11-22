@@ -115,7 +115,7 @@ async def main():
         "ping": lambda context: "pong",
     }, overwrite=True)
     svc = await server.get_service(service_id)
-    url = f"http://localhost:3090/#/chat/new?service-id={svc.id}"
+    url = f"https://chat.aicell.io/#/chat/new?service-id={svc.id}"
     print(f"Hypha bot is ready!\nYou can connect via {url}")
 
 if __name__ == "__main__":
