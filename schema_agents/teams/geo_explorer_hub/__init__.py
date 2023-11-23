@@ -21,7 +21,8 @@ from schema_agents.teams.geo_explorer_hub.geo_explorer import create_geo_querier
 
 def create_geo_explorer_hub(client, investment, path_to_json):
     """Create a team for NCBI Geo exploration"""
-    team = Team(name = "Geo Explorer Hub", profile = "A team consisting of a single role for querying the NCBI GEO database", goal = "Query the NCBI GEO database and process results", investment = investment)
+    team = Team(name="Geo Explorer Hub", profile = "A team consisting of a single role for querying the NCBI GEO database", goal = "Query the NCBI GEO database and process results", investment = investment)
     geo_querier = create_geo_querier(path_to_json)
     team.hire([geo_querier])
     return(team)
+

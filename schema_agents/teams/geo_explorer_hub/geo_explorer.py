@@ -26,6 +26,7 @@ import itertools
 import random
 from schema_agents.role import Role
 from bioimageio_chatbot.chatbot import QuestionWithHistory
+from schema_agents.schema import Message
 # from bioimageio_chatbot.chatbot import *
 
 def load_geo_search_terms(fpath):
@@ -165,21 +166,25 @@ def create_geo_querier(path_to_json):
         user_info: str = Field(description="Brief user info summary for personalized response, including name, background etc.")
         ncbi_geo_query: str = Field(description=f"""An NCBI GEO Datasets database Entrez query conforming to the user's request. The query MUST include a term for Entry Type = gds. Available terms (in JSON format) are: {search_terms_stats}""")
 
-    async def create_geo_query(question_with_history: QuestionWithHistory = None, role: Role = None) -> str:
+    # async def create_geo_query(question_with_history: QuestionWithHistory = None, role: Role = None) -> str:
+    # async def create_geo_query(input_message: Message = None, role: Role = None) -> str:
+    async def create_geo_query(inputs: str = None, role: Role = None) -> str:
         """Answers the user's query by creating an ENTREZ query url for getting the relevant information from the GEO database"""
-        inputs = [question_with_history.user_profile] + list(question_with_history.chat_history) + [question_with_history.question]
+        # inputs = [question_with_history.user_profile] + list(question_with_history.chat_history) + [question_with_history.question]
+        # inputs = Message
         req = await role.aask(inputs, GEOQuery)
         ncbi_geo_query = req.ncbi_geo_query
-        print(f"ncbi_query:\n{ncbi_geo_query}\n")
-        loop = asyncio.get_running_loop()
-        ids, web_env = python_geo_query_function(ncbi_geo_query)
-        geo_accs = [f"GDS{i}" for i in ids]
-        print(f"GEO accesions: {geo_accs}")
-        sig_gene_ids = [fetch_significant_genes(geo_acc) for geo_acc in geo_accs]
-        gene_db_ids = [fetch_gene_from_geoprofiles(sg_id) for sg_id in sig_gene_ids]
-        gene_names = [fetch_name_from_gene_ids(gids) for gids in gene_db_ids]
-        sr = geneHits(request = req.request, user_info = req.user_info, gene_list = gene_names)
-        return(sr)
+        return(req)
+        # print(f"ncbi_query:\n{ncbi_geo_query}\n")
+        # loop = asyncio.get_running_loop()
+        # ids, web_env = python_geo_query_function(ncbi_geo_query)
+        # geo_accs = [f"GDS{i}" for i in ids]
+        # print(f"GEO accesions: {geo_accs}")
+        # sig_gene_ids = [fetch_significant_genes(geo_acc) for geo_acc in geo_accs]
+        # gene_db_ids = [fetch_gene_from_geoprofiles(sg_id) for sg_id in sig_gene_ids]
+        # gene_names = [fetch_name_from_gene_ids(gids) for gids in gene_db_ids]
+        # sr = geneHits(request = req.request, user_info = req.user_info, gene_list = gene_names)
+        # return(sr)
     
     geo_querier = Role(
         name = "Dave",
