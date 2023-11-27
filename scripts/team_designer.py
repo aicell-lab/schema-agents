@@ -1,11 +1,12 @@
 import asyncio
+import os
 from schema_agents.role import Role
 from schema_agents.schema import Message
 from pydantic import BaseModel, Field
 from typing import List
 from schema_agents.teams import Team
 
-
+from schema_agents.utils.pydantic import jsonschema_to_pydantic
 
 class SchemaActionOutline(BaseModel):
      """A detailed description of a python function containing type annotations, a function signature, and pseudocode for the function body"""
@@ -18,12 +19,11 @@ class SchemaActionImplemented(BaseModel):
     content: str = Field(description = """The finalized implemented python function. The function must follow the form
                          ```
                         async def function_name(input_arg : input_arg_type, role: Role = None) -> output_type:
-                        inputs = <function_logic>
-                        response = await role.aask(inputs, output_type)
+                        \"\"\"docstring for the function\"\"\"
+                        input_arg = transform_input(input_arg) # optionally transform the input_arg or directly pass it into the next line, in the transform, we can unpack values, provide additional information etc. 
+                        response = await role.aask(input_arg, output_type)
                         return(response)
                          ```
-                        the <function_logic> can interact with the input_arg by unpacking its fields and 
-                         manipulating them or it can pass the input_arg directly into the `role.aask` function call
                          """)
      
 
@@ -75,6 +75,7 @@ from pydantic import BaseModel, Field```.
                         After that there will be a section called "Classes" followed by the implemented team's classes where each class has the form:
                          ```
 class <class_name>(BaseModel):
+    \"\"\"Doc string for the class\"\"\"
     <field>: <field_type> = Field(description = "<field_description>")
     ...
                          ``` where <field>, <field_type>, and <field_description> have been appropriately filled out.
@@ -108,9 +109,19 @@ print(responses)```
     
 async def write_final_code(implemented_team : ImplementedTeam, role: Role = None) -> FinalCode:
     """Take the implemented team and unpack it into a string which can be pasted into a .py file to run"""
+    # dump implemented_team
+    # with open("team.json", 'w') as f:
+    #     print(implemented_team.json(), file=f)
+
+    # schemas = []
+    # for claz in implemented_team.classes:
+    #     schemas.append(jsonschema_to_pydantic(claz))
+       
+    # role = Role(**implemented_team.agents[0].dict())
+    
     response = await role.aask(implemented_team, FinalCode)
     print(f"Saving file to filename: {response.file_name}")
-    with open(response.file_name, 'w') as f:
+    with open(os.path.join(".data", response.file_name), 'w') as f:
         print(response.content, file = f)
     return(response)
 
