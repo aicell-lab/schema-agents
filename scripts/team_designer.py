@@ -13,18 +13,20 @@ class SchemaActionOutline(BaseModel):
      content: str = Field(description = """The python function for performing the desired task. 
                           This should always contain a keyword argument called `role` of type `Role` that defaults to None. """)
 
+schema_action_prompt='''The finalized implemented python function. The function must follow the form
+```
+async def function_name(input_arg : input_arg_type, role: Role = None) -> output_type:
+"""docstring for the function"""
+input_arg = transform_input(input_arg) # optionally transform the input_arg or directly pass it into the next line, in the transform, we can unpack values, provide additional information etc. 
+response = await role.aask(input_arg, output_type)
+return(response)
+```
+'''
+
 class SchemaActionImplemented(BaseModel):
     """An implemented python function based off a function outline that uses built-in python libraries 
     to execute the desired action according to the pseudocode in the function outline body"""
-    content: str = Field(description = """The finalized implemented python function. The function must follow the form
-                         ```
-                        async def function_name(input_arg : input_arg_type, role: Role = None) -> output_type:
-                        \"\"\"docstring for the function\"\"\"
-                        input_arg = transform_input(input_arg) # optionally transform the input_arg or directly pass it into the next line, in the transform, we can unpack values, provide additional information etc. 
-                        response = await role.aask(input_arg, output_type)
-                        return(response)
-                         ```
-                         """)
+    content: str = Field(description = schema_action_prompt)
      
 
 class SchemaAgentOutline(BaseModel):
