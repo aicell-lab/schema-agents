@@ -15,18 +15,16 @@ class SchemaActionOutline(BaseModel):
 class SchemaActionImplemented(BaseModel):
     """An implemented python function based off a function outline that uses built-in python libraries 
     to execute the desired action according to the pseudocode in the function outline body"""
-    content: str = Field(description = '''The finalized implemented python function. The function must follow the form
+    content: str = Field(description = """The finalized implemented python function. The function must follow the form
                          ```
-async def function_name(input_arg : input_arg_type, role: Role = None) -> output_type:
-    """<detailed docstring for the function>"""
-    inputs = <function_logic>
-    response = await role.aask(inputs, output_type)
-    return(response)
+                        async def function_name(input_arg : input_arg_type, role: Role = None) -> output_type:
+                        inputs = <function_logic>
+                        response = await role.aask(inputs, output_type)
+                        return(response)
                          ```
                         the <function_logic> can interact with the input_arg by unpacking its fields and 
-                         manipulating them or it can pass the input_arg directly into the `role.aask` function call. The <detailed docstring for the function> contains
-                         detailed information about the function.
-                         ''')
+                         manipulating them or it can pass the input_arg directly into the `role.aask` function call
+                         """)
      
 
 class SchemaAgentOutline(BaseModel):
@@ -63,6 +61,7 @@ class ImplementedTeam(BaseModel):
 
 class FinalCode(BaseModel):
     """A formatted string containing the python implementation of the team"""
+    file_name: str = Field(description = "A filename to save the python file. Must have a .py extension")
     content: str = Field(description="""A formatted string to be pasted into a .py file which can run the team.
                          The string must start with the following import statements: 
 
@@ -98,7 +97,7 @@ class <class_name>(BaseModel):
 team.hire(agents)
 event_bus = team.get_event_bus()
 event_bus.register_default_events()
-responses = await team.handle(Message(content="Mercury exposure in humans", role="User"))
+responses = await team.handle(Message(content="Mercury poisoning in humans", role="User"))
 print(responses)```
                          And that will finish the main() function. Finally it will end with:
 ```if __name__ == "__main__":
@@ -110,7 +109,9 @@ print(responses)```
 async def write_final_code(implemented_team : ImplementedTeam, role: Role = None) -> FinalCode:
     """Take the implemented team and unpack it into a string which can be pasted into a .py file to run"""
     response = await role.aask(implemented_team, FinalCode)
-    print(response.content)
+    print(f"Saving file to filename: {response.file_name}")
+    with open(response.file_name, 'w') as f:
+        print(response.content, file = f)
     return(response)
 
 
@@ -170,9 +171,11 @@ async def main():
     event_bus = team.get_event_bus()
     event_bus.register_default_events()
     responses = await team.handle(Message(content="Design a team that will be able to take a user's input and query the NCBI GEO database using structured queries, interpret the results, and suggest follow up studies", role="User"))
-    with open("output.py", 'w') as f:
-        print(responses[-1].content, file = f)
+    # with open("output.py", 'w') as f:
+        # print(responses[2]["content"], file = f)
     print(responses)
+    loop = asyncio.get_running_loop()
+    loop.stop()
  
 if __name__ == "__main__":
     loop = asyncio.get_event_loop()
