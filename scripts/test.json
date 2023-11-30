@@ -1,0 +1,99 @@
+{
+    "name": "CulinaryCreatives",
+    "profile": "A team specialized in generating recipes based on a set of given ingredients.",
+    "goal": "To create a variety of recipes that utilize the provided ingredients in a creative and tasty manner.",
+    "agents": [
+      {
+        "name": "IngredientAnalyzer",
+        "profile": "An agent that analyzes the given list of ingredients to determine their compatibility and potential culinary uses.",
+        "goal": "To categorize and understand the properties of each ingredient to suggest the best culinary applications.",
+        "actions": [
+          {
+            "name": "analyze_ingredients",
+            "input_action_schema": "IngredientList",
+            "output_action_schema": "AnalyzedIngredients",
+            "code_logic": [
+              "Parse the list of ingredients.",
+              "Categorize ingredients by type (e.g., protein, vegetable, spice).",
+              "Identify primary flavors of each ingredient.",
+              "Determine potential ingredient pairings based on flavor profiles.",
+              "Assess the seasonal availability and suggest alternatives if necessary."
+            ]
+          }
+        ]
+      },
+      {
+        "name": "RecipeGenerator",
+        "profile": "An agent that takes the analyzed ingredients and generates creative recipes.",
+        "goal": "To use the analysis provided by the IngredientAnalyzer to create detailed recipes that are both feasible and delicious.",
+        "actions": [
+          {
+            "name": "generate_recipes",
+            "input_action_schema": "AnalyzedIngredients",
+            "output_action_schema": "Recipes",
+            "code_logic": [
+              "Receive the analyzed ingredients with their categories and pairings.",
+              "Select a base recipe structure (e.g., salad, stew, bake) that fits the ingredients.",
+              "Incorporate the ingredients into the recipe structure, ensuring balance in flavor and texture.",
+              "Adjust the recipe for portion sizes and cooking methods.",
+              "Provide instructions for preparation and cooking."
+            ]
+          }
+        ]
+      }
+    ],
+    "action_schema": [
+      {
+        "fields": [
+          {
+            "field_name": "ingredients",
+            "field_type": "List[str]"
+          }
+        ],
+        "field_descriptions": [
+          "A list of ingredient names provided by the user."
+        ],
+        "class_description": "A schema representing the initial list of ingredients to be analyzed."
+      },
+      {
+        "fields": [
+          {
+            "field_name": "categorized_ingredients",
+            "field_type": "Dict[str, List[str]]"
+          },
+          {
+            "field_name": "flavor_profiles",
+            "field_type": "Dict[str, str]"
+          },
+          {
+            "field_name": "seasonal_availability",
+            "field_type": "Dict[str, bool]"
+          },
+          {
+            "field_name": "suggested_pairings",
+            "field_type": "Dict[str, List[str]]"
+          }
+        ],
+        "field_descriptions": [
+          "A dictionary categorizing ingredients by their type.",
+          "A dictionary mapping each ingredient to its primary flavor profile.",
+          "A dictionary indicating whether each ingredient is seasonally available.",
+          "A dictionary suggesting potential pairings for each ingredient."
+        ],
+        "class_description": "A schema representing the analyzed data of the ingredients, including categories, flavors, and pairings."
+      },
+      {
+        "fields": [
+          {
+            "field_name": "recipes",
+            "field_type": "List[Dict[str, Any]]"
+          }
+        ],
+        "field_descriptions": [
+          "A list of dictionaries, each representing a recipe with details such as ingredients, instructions, and cooking methods."
+        ],
+        "class_description": "A schema representing the final output of recipes generated from the analyzed ingredients."
+      }
+    ]
+  }
+  

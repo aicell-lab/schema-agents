@@ -1,0 +1,62 @@
+{
+    "$defs": {
+        "SchemaField": {
+            "description": "A field within an ActionSchema",
+            "properties": {
+                "field_name": {
+                    "description": "The field's name",
+                    "title": "Field Name",
+                    "type": "string"
+                },
+                "field_type": {
+                    "description": "The field's type. Must be either a valid Python type or another ActionSchema defined in the team's list of action_schema.",
+                    "title": "Field Type",
+                    "type": "string"
+                }
+            },
+            "required": [
+                "field_name",
+                "field_type"
+            ],
+            "title": "SchemaField",
+            "type": "object"
+        }
+    },
+    "description": "A schema definition for classes that will be passed between actions",
+    "properties": {
+        "name": {
+            "description": "The schema definition's name. It should follow python class naming conventions e.g. CamelCase",
+            "title": "Name",
+            "type": "string"
+        },
+        "fields": {
+            "description": "This ActionSchema's list of SchemaFields",
+            "items": {
+                "$ref": "#/$defs/SchemaField"
+            },
+            "title": "Fields",
+            "type": "array"
+        },
+        "field_descriptions": {
+            "description": "A detailed description of each of the class's SchemaFields",
+            "items": {
+                "type": "string"
+            },
+            "title": "Field Descriptions",
+            "type": "array"
+        },
+        "class_description": {
+            "description": "A detailed description of this ActionSchema",
+            "title": "Class Description",
+            "type": "string"
+        }
+    },
+    "required": [
+        "name",
+        "fields",
+        "field_descriptions",
+        "class_description"
+    ],
+    "title": "ActionSchema",
+    "type": "object"
+}
