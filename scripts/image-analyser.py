@@ -14,14 +14,18 @@ import base64
 import sys
 import datetime
 import json
+from inspect import signature
 from pathlib import Path
 from typing import Union, Optional
 
 from pydantic import BaseModel, Field
 import matplotlib.pyplot as plt
+import numpy as np
 
 from schema_agents.role import Role
 from schema_agents.schema import Message
+from pyotritonclient import execute  # noqa
+from imjoy_rpc.hypha.sync import connect_to_server
 
 from openai import AsyncOpenAI
 
@@ -37,14 +41,60 @@ class ImageAnalysisRequest(BaseModel):
     analysis_plan: list[str] = Field(description="Steps required to fullfil the users request")
 
 
+# class ImageAnalysisCode(BaseModel):
+    # """Creates image analysis script, not using cellpose, using python to fullfil an analysis request"""
+    # # f"""Creates image analysis script python {sys.version_info.major}.{sys.version_info.minor} using PEP 8 and best practices, to fullfil an analysis request"""
+    # script: str = Field(description=f"""Generated Python {sys.version_info.major}.{sys.version_info.minor} script for image analysis. In the script you will have access to a local variable `input_image`
+                        # which contains a numpy array of shape XYC which was loaded using imageio.imread. The output of the analysis should be stored
+                        # as a variable called `output_image` which is a numpy array representing an image. Use print to provide extra information for debugging and error purposes.
+                        # """)
+    # dependencies: list[str]= Field(description="List of python pip packages needed by the script")
+
+
+
+def run_cellpose(image: np.ndarray, diameter:float=30, model_type:str="cyto") -> np.ndarray:
+    """Runs cellpose segmentation.
+    Inputs:
+        image: 3d np.ndarray corresponding to an image of cells with dimensnions (channels, width, height) aka (CXY)
+        diameter: float of the cell size. The diameter can be in the range [5, 500]
+        model_type: str for model type. Can be one of ["cyto", "nuclei"]
+    Return:
+        2d np.ndarray corresponding to the mask of cell segmentations
+    """
+
+    server = connect_to_server(
+        {"server_url": "https://ai.imjoy.io"}
+    )
+    triton = server.get_service("triton-client")
+
+    param = {'diameter': diameter, 'model_type': model_type}
+    # run inference
+    results = triton.execute(inputs=[image.transpose(2, 0, 1).astype('float32'), param],
+                                  model_name='cellpose-python',
+                                  decode_bytes=True,)
+    # mask = results['mask']
+    # param = {'diameter': diameter, 'model_type': model_type}
+    # # run inference
+    # results = await execute([image.transpose(2, 0, 1), param],
+            # server_url='https://ai.imjoy.io/triton',
+            # model_name='cellpose-python',
+            # decode_bytes=True)
+    mask = results.get('mask', None)
+    if mask is not None:
+        mask = mask[0]
+    return mask
+
 class ImageAnalysisCode(BaseModel):
-    """Creates image analysis script using python to fullfil an analysis request"""
-    # f"""Creates image analysis script python {sys.version_info.major}.{sys.version_info.minor} using PEP 8 and best practices, to fullfil an analysis request"""
-    script: str = Field(description=f"""Generated Python {sys.version_info.major}.{sys.version_info.minor} script for image analysis. In the script you will have access to a local variable `input_image`
-                        which contains a numpy array of shape XYC which was loaded using imageio.imread. The output of the analysis should be stored
-                        as a variable called `output_image` which is a numpy array representing an image. Use print to provide extra information for debugging and error purposes.
-                        """)
-    dependencies: list[str]= Field(description="List of python pip packages needed by the script")
+    """Creates image analysis script which makes use of cellpose to fullfil an analysis request"""
+    script: str = Field(description=
+        f"Generated Python {sys.version_info.major}.{sys.version_info.minor} script for image analysis."
+        "In the script you will have access to a local variable `input_image` which contains the result of preloading the input_image_url a numpy array."
+        "The input_image shape is (3, 210, 153)"
+        "Use the `input_image` provided instead of loading from the url."
+        "If you want to segment an image of cells, you can use the cellpose model via a function "
+        f"called `run_cellpose{str(signature(run_cellpose))}` which has the docstring: {run_cellpose.__doc__}"
+    )
+    dependencies: list[str]= Field(description="List of python pip packages needed by the script. This is not allowed to include `cellpose`")
 
 
 def encode_image_from_path(image_path):
@@ -168,12 +218,14 @@ def combine_input_and_output_images(input_image_url, output_image):
 
 def run_code_response(image_url: str, resp: ImageAnalysisCode) -> dict:
     for module in resp.dependencies:
+        if "cellpose" in module:
+            continue
         subprocess.run([sys.executable, "-m", "pip", "install", module])
     image = imageio.imread(image_url)
     if image.ndim == 2:
         image = image[...,None]
     assert image.shape[2] in (1,3)
-    return execute_code(resp.script, {"input_image": image})
+    return execute_code(resp.script, {"input_image": image, "run_cellpose": run_cellpose})
 
 
 async def respond_to_user(query: str, role: Role = None) -> str:
@@ -184,6 +236,7 @@ async def respond_to_user(query: str, role: Role = None) -> str:
         return resp.response
 
     if isinstance(resp, ImageAnalysisRequest):
+        # resp_code = await role.aask(resp, Union[ImageAnalysisCode, ImageAnalysisCodeWithCellPose])
         resp_code = await role.aask(resp, ImageAnalysisCode)
         # packages = ",".join([f"'{p}'" for p in reps.dependencies])
         ret = run_code_response(resp.input_image_url, resp_code)
@@ -244,6 +297,18 @@ Please Correct it"""
     return "Could not create the required pipeline"
 
 
+def get_image_stats(url):
+    """Get stats on an image loaded using imageio"""
+    image = iio.imread(url)
+    return dict(
+        source=url,
+        dtype=image.dtype,
+        shape=image.shape,
+        min=im.min(),
+        max=im.min(),
+    )
+
+
 async def main():
     ian = Role(
         name="Ian",
@@ -256,7 +321,9 @@ async def main():
     event_bus.register_default_events()
     # responses = await ian.handle(Message(content="Analyse this image and tell me where the nuclei are.", role="User"))
     # responses = await ian.handle(Message(content="Show me where the dark blobs in this image are : `https://imagej.net/images/blobs.gif`", role="User"))
-    responses = await ian.handle(Message(content="Plot the distribution of sizes of the dark blobs in the following image : `https://imagej.net/images/blobs.gif`", role="User"))
+    # responses = await ian.handle(Message(content="Plot the distribution of sizes of the dark blobs in the following image : `https://imagej.net/images/blobs.gif`", role="User"))
+    responses = await ian.handle(Message(content="Segment the cells in the following image: `https://www.cellpose.org/static/images/img08.png`", role="User"))
+
     print("******************** Final response ********************")
     print(responses)
 
