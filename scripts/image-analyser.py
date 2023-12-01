@@ -10,10 +10,18 @@ import subprocess
 import asyncio
 import traceback
 import imageio
+import base64
+import sys
 from typing import List, Union
+
+import requests
+from pydantic import BaseModel, Field
+import matplotlib.pyplot as plt
+
 from schema_agents.role import Role
 from schema_agents.schema import Message
-from pydantic import BaseModel, Field
+
+from openai import AsyncOpenAI
 
 
 TRIES = 5
@@ -35,7 +43,35 @@ class ImageAnalysisCode(BaseModel):
     dependencies: list[str]= Field(description="List of python pip packages needed by the script")
 
 
-def execute_code(script, context=None):
+def encode_image_from_path(image_path):
+    with open(image_path, "rb") as image_file:
+        return base64.b64encode(image_file.read()).decode('utf-8')
+
+
+async def aask_vision(prompt, image_path):
+    """Perform a Vision API call"""
+    base64_image = encode_image_from_path(image_path)
+    client = AsyncOpenAI()
+    response = await client.chat.completions.create(
+        model="gpt-4-vision-preview",
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "What's "},
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}
+                    },
+                ]
+            },
+        ],
+        max_tokens=300,
+    )
+    return response.choices[0]
+
+
+def execute_code(script, context=None) -> dict:
     if context is None:
         context = {}
 
@@ -57,12 +93,14 @@ def execute_code(script, context=None):
         stderr_output = sys.stderr.getvalue()
 
         return {
+            "success": True,
             "stdout": stdout_output,
             "stderr": stderr_output,
             "context": local_vars  # Include context variables in the result
         }
     except Exception as e:
         return {
+            "success": False,
             "stdout": "",
             "stderr": str(e),
             "context": context  # Include context variables in the result even if an error occurs
@@ -78,6 +116,18 @@ class DirectResponse(BaseModel):
     response: str = Field(description="The response to the user's question answering what that asked for.")
 
 
+def combine_input_and_output_images(input_image_url, output_image):
+    fig, (ax1, ax2) = plt.subplots(1, 2)
+    input_image = imageio.imread(input_image_url)
+    ax1.imshow(input_image)
+    ax2.imshow(output_image)
+    fout = io.BytesIO()
+    plt.savefig(fout)
+    plt.close()
+    base64_string = base64.b64encode(fout.read()).decode()
+    return base64_string
+
+
 def run_code_response(image_url: str, resp: ImageAnalysisCode) -> dict:
     for module in resp.dependencies:
         subprocess.run([sys.executable, "-m", "pip", "install", module])
@@ -89,7 +139,7 @@ def run_code_response(image_url: str, resp: ImageAnalysisCode) -> dict:
 
 
 async def respond_to_user(query: str, role: Role = None) -> str:
-    """Respond to user's request by recipe book."""
+    """Respond to user's request"""
     # response = await role.aask(query, ImageAnalysisRequest)
     resp = await role.aask(query, Union[DirectResponse, ImageAnalysisRequest])
     if isinstance(resp, DirectResponse):
@@ -99,23 +149,49 @@ async def respond_to_user(query: str, role: Role = None) -> str:
         resp_code = await role.aask(resp, ImageAnalysisCode)
         # packages = ",".join([f"'{p}'" for p in reps.dependencies])
         ret = run_code_response(resp.input_image_url, resp_code)
-
         for _ in range(TRIES):
             try:
+                if not ret["success"]:
+                    raise RuntimeError(f"Generated code failed to run:\n{ret['stderr']}")
+
+                if "context" not in ret:
+                    traceback.print_exc()
+                    raise Exception(f"Something else happened, context is not in run_code_response return...:\n{traceback.format_exc()}")
+
                 if "output_image" not in ret["context"]:
                     raise RuntimeError("output_image variable has not been created after running the script")
                 output_image = ret["context"]["output_image"]
                 if output_image.ndim not in (2,3):
-                    raise RuntimeError("output_image variable has not been created after running the script")
+                    raise RuntimeError("output_image variable does not seem to represent an image")
+
+                composite_image = combine_input_and_output_images(resp.input_image_url, output_image)
+
+                # Now use vision API to check output_image against the requirement
+                is_good = await aask_vision(f"Does the following image represent a good solution to the query: `{query}`? Give a simple answer of `yes` or `no` if you are sure, or say `unsure`",
+                                   composite_image)
+                print("IS GOOD?")
+                print(is_good)
+                if "yes" not in is_good.lower():
+                    raise RuntimeError("The output generated by the script does not fullfil the request")
                 return resp_code
-            except Exception:
+            except RuntimeError:
                 # Need to refine the code, update the query
                 prompt = f"""
+
 You were asked the following: `{query}`.
-You produced this script: `{resp_code.script}`, but it did not work properly, because of the following error: `{traceback.format_exc()}`.
+You produced this script: \n`{resp_code.script}`\n,but it did not work properly, because of the following error:\n`{traceback.format_exc()}`.
 Please Correct it"""
+            except Exception:
+                print("☠️")
+                print(traceback.format_exc())
+                return "Something broke 😢"
+
+            print("New prompt:")
+            print(prompt)
             resp_code = await role.aask(prompt, ImageAnalysisCode)
             ret = run_code_response(resp.input_image_url, resp_code)
+
+
 
     return "Could not create the required pipeline"
 
@@ -131,7 +207,8 @@ async def main():
     event_bus = ian.get_event_bus()
     event_bus.register_default_events()
     # responses = await ian.handle(Message(content="Analyse this image and tell me where the nuclei are.", role="User"))
-    responses = await ian.handle(Message(content="Tell me where the dark blobs in this image are : `https://imagej.net/images/blobs.gif`", role="User"))
+    responses = await ian.handle(Message(content="Show me where the dark blobs in this image are : `https://imagej.net/images/blobs.gif`", role="User"))
+    print("******************** Final response ********************")
     print(responses)
 
 if __name__ == "__main__":
