@@ -1,0 +1,1 @@
+{"title": "CategorizedIngredients", "type": "object", "properties": {"food_groups": {"title": "Food Groups", "type": "object"}, "potential_dish_types": {"title": "Potential Dish Types", "type": "array", "items": {}}}, "required": ["food_groups", "potential_dish_types"]}
