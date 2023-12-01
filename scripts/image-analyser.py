@@ -13,6 +13,7 @@ import imageio
 import base64
 import sys
 import datetime
+import json
 from pathlib import Path
 from typing import Union, Optional
 
@@ -37,8 +38,9 @@ class ImageAnalysisRequest(BaseModel):
 
 
 class ImageAnalysisCode(BaseModel):
-    """Creates image analysis script python 3 using PEP 8 and best practices, to fullfil an analysis request"""
-    script: str = Field(description="""Generated Python script for image analysis. In the script you will have access to a local variable `input_image`
+    """Creates image analysis script using python to fullfil an analysis request"""
+    # f"""Creates image analysis script python {sys.version_info.major}.{sys.version_info.minor} using PEP 8 and best practices, to fullfil an analysis request"""
+    script: str = Field(description=f"""Generated Python {sys.version_info.major}.{sys.version_info.minor} script for image analysis. In the script you will have access to a local variable `input_image`
                         which contains a numpy array of shape XYC which was loaded using imageio.imread. The output of the analysis should be stored
                         as a variable called `output_image`. Use print to provide extra information for debugging and error purposes.
                         """)
@@ -52,14 +54,28 @@ def encode_image_from_path(image_path):
 
 async def aask_vision(prompt, image):
     """Perform a Vision API call"""
+
+    system_message = (
+        "Act as an image analysis expert, that has been given a summary image composed of two panels."
+        " The left panel shows the input image provided by the user."
+        "The right panel shows the output image produced by another image analyst."
+        "Your goal is to provide feedback on if the output has satisfied the request from the user. "
+        "You must respond with a `valid JSON string`, starting with a `{`. No other text output is allowed."
+        'Here is are example responses: `{"success": true, "details": "The output clearly satisfies the users request..."}`'
+        '`{"success": false, "details": "The output does not satisfy the users request because..."}`'
+    )
     client = AsyncOpenAI()
     response = await client.chat.completions.create(
         model="gpt-4-vision-preview",
         messages=[
             {
+                "role": "system",
+                "content": system_message,
+            },
+            {
                 "role": "user",
                 "content": [
-                    {"type": "text", "text": "What's "},
+                    {"type": "text", "text": prompt},
                     {
                         "type": "image_url",
                         "image_url": {"url": f"data:image/png;base64,{image}"}
@@ -67,10 +83,17 @@ async def aask_vision(prompt, image):
                 ]
             },
         ],
-        max_tokens=300,
+        # response_format={ "type": "json_object" },
+        max_tokens=600,
     )
-    return response.choices[0]
+    print(response.choices[0].message.content)
 
+    raw_out = response.choices[0].message.content
+    try:
+        resp = json.loads(raw_out)
+    except:
+        resp = {"success": False, "details": raw_out}
+    return resp
 
 def execute_code(script, context=None) -> dict:
     if context is None:
@@ -97,6 +120,7 @@ def execute_code(script, context=None) -> dict:
             "success": True,
             "stdout": stdout_output,
             "stderr": stderr_output,
+            "stacktrace": "",
             "context": local_vars  # Include context variables in the result
         }
     except Exception as e:
@@ -104,6 +128,7 @@ def execute_code(script, context=None) -> dict:
             "success": False,
             "stdout": "",
             "stderr": str(e),
+            "stacktrace": traceback.format_exc(),
             "context": context  # Include context variables in the result even if an error occurs
         }
     finally:
@@ -112,11 +137,13 @@ def execute_code(script, context=None) -> dict:
         sys.stderr = original_stderr
 
 
-def save_attempt(num, code="", error=None):
+def save_attempt(num, code="", error=None, image=None):
     filename_code = f"{START_TIME}_attempt_{num}_code.py"
     filename_error = f"{START_TIME}_attempt_{num}_error.log"
+    filename_image = f"{START_TIME}_attempt_{num}_image.png"
     Path(filename_code).write_text(code)
     Path(filename_error).write_text(error)
+    Path(filename_image).write_bytes(base64.b64decode(image))
 
 
 class DirectResponse(BaseModel):
@@ -128,7 +155,9 @@ def combine_input_and_output_images(input_image_url, output_image):
     fig, (ax1, ax2) = plt.subplots(1, 2)
     input_image = imageio.imread(input_image_url)
     ax1.imshow(input_image)
+    ax1.set_title("Input Image")
     ax2.imshow(output_image)
+    ax2.set_title("Output Image")
     fout = io.BytesIO()
     plt.savefig(fout, format="png")
     plt.close()
@@ -159,6 +188,7 @@ async def respond_to_user(query: str, role: Role = None) -> str:
         # packages = ",".join([f"'{p}'" for p in reps.dependencies])
         ret = run_code_response(resp.input_image_url, resp_code)
         for try_number in range(TRIES):
+            composite_image = ''
             try:
                 if not ret["success"]:
                     raise RuntimeError(f"Generated code failed to run:\n{ret['stderr']}")
@@ -176,29 +206,29 @@ async def respond_to_user(query: str, role: Role = None) -> str:
                 composite_image = combine_input_and_output_images(resp.input_image_url, output_image)
 
                 # Now use vision API to check output_image against the requirement
-                is_good = await aask_vision(
-                        f"Does the following image represent a good solution to the query: `{query}`? Give a simple answer of `yes` or `no` if you are sure, or say `unsure`",
+                vision_result = await aask_vision(
+                        "Here is the request:"
+                        f"`{resp.request}`.",
                         composite_image)
-                if "yes" not in is_good.lower():
+                print("VISION SAYS:", vision_result)
+                if not vision_result["success"]:
                     raise RuntimeError("The output generated by the script does not fullfil the request")
                 return resp_code
             except RuntimeError:
                 # Need to refine the code, update the query
 
-                save_attempt(try_number, code=resp_code.script, error=traceback.format_exc())
+                save_attempt(try_number, code=resp_code.script, error=f"{traceback.format_exc()}\n{ret.get('stacktrace','')}", image=composite_image)
 
                 prompt = f"""
 
 You were asked the following: `{query}`.
-You produced this script: \n`{resp_code.script}`\n,but it did not work properly, because of the following error:\n`{traceback.format_exc()}`.
+You produced this script: \n`{resp_code.script}`\n,but it did not work properly, because of the following error:\n`{traceback.format_exc()}`\n{ret.get('stacktrace','')}.
 Please Correct it"""
             except Exception:
                 print("☠️")
                 print(traceback.format_exc())
                 return "Something broke 😢"
 
-            print("New prompt:")
-            print(prompt)
             resp_code = await role.aask(prompt, ImageAnalysisCode)
             ret = run_code_response(resp.input_image_url, resp_code)
 
@@ -218,7 +248,8 @@ async def main():
     event_bus = ian.get_event_bus()
     event_bus.register_default_events()
     # responses = await ian.handle(Message(content="Analyse this image and tell me where the nuclei are.", role="User"))
-    responses = await ian.handle(Message(content="Show me where the dark blobs in this image are : `https://imagej.net/images/blobs.gif`", role="User"))
+    # responses = await ian.handle(Message(content="Show me where the dark blobs in this image are : `https://imagej.net/images/blobs.gif`", role="User"))
+    responses = await ian.handle(Message(content="Invert the following image : `https://imagej.net/images/blobs.gif`", role="User"))
     print("******************** Final response ********************")
     print(responses)
 
