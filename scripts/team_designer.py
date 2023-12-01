@@ -2,6 +2,7 @@ import asyncio
 import os
 from schema_agents.role import Role
 from schema_agents.schema import Message
+import pydantic
 from pydantic import BaseModel, Field
 from typing import List
 from schema_agents.teams import Team
@@ -62,14 +63,23 @@ async def write_final_code(implemented_team : AgentTeamDraft, role: Role = None)
     team_dir = implemented_team.name.replace(' ', '_')
     class_dir = os.path.join(team_dir, 'action_schema')
     os.makedirs(class_dir, exist_ok = True)
-    with open(os.path.join(team_dir, "team.json"), "w") as f:
-        print(implemented_team.model_dump_json(), file = f)
+
+    for a_s in implemented_team.action_schema:
+        fields = {field.field_name : (field.field_type, Field(... , description=a_s.field_descriptions[i_field])) for i_field, field in enumerate(a_s.fields)}
+        a_s_model = pydantic.create_model(a_s.name, **fields)
+        a_s_model.__doc__ = a_s.class_description
+        print(a_s.name)
+        with open(os.path.join(class_dir, f"{a_s.name}.json"), 'w') as f:
+            print(a_s_model.schema_json(), file = f)
+
+    # with open(os.path.join(team_dir, "team.json"), "w") as f:
+        # print(implemented_team.model_dump_json(), file = f)
 
     open(os.path.join(team_dir, '__init__.py'), 'w')
     # for action_schema in implemented_team.action_schema:
 
-
-    response = FinalResponse(content = str(implemented_team.model_dump_json()))
+    # response = FinalResponse(content = str(implemented_team.model_dump_json()))
+    response = FinalResponse(content = "I'm done")
     return(response)
 
 async def draft_team(task: str, role: Role = None) -> AgentTeamDraft:

@@ -1,0 +1,18 @@
+{
+    "title": "Recipes",
+    "description": "A collection of recipes generated based on the analysis of the ingredients.",
+    "type": "object",
+    "properties": {
+        "recipe_list": {
+            "title": "Recipe List",
+            "description": "A list of recipe names or descriptions that fit the criteria provided by the Ingredient Analysis.",
+            "type": "array",
+            "items": {
+                "type": "string"
+            }
+        }
+    },
+    "required": [
+        "recipe_list"
+    ]
+}
