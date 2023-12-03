@@ -37,7 +37,6 @@ class Agent(BaseModel):
     goal: str = Field(description = "The agent's goal. This will be used as input to an LLM model")
     actions: List[Action] = Field(description = "The agent's list of actions")
 
-
      
 class AgentTeam(BaseModel):
     """A team of autonomous agents meant to accomplish a given task"""
@@ -49,9 +48,6 @@ class AgentTeam(BaseModel):
 
 class AgentTeamDraft(AgentTeam):
     """A team of autonomous agents such that (1) exactly one agent takes `str` as its input_action_schema for one of its Actions"""
-
-# class AgentTeamV2(AgentTeam):
-
 
     
 class FinalResponse(BaseModel):
