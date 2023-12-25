@@ -33,10 +33,17 @@ async def search_internet(query: str) -> str:
     """Search internet for more information."""
     return "Nothing found"
 
+class UserInput(BaseModel):
+    """User clarification"""
+    goal: str = Field(description="Clarified goal")
+    notes: str = Field(description="Additional notes")
+
 async def get_user_input(query: str) -> str:
     """Get additional information from user."""
-    return ("The goal is to get the image of the green cells under IF staining and count the number of cells in the image."
-    "The software should accept user uploaded files, has a simple web interface, the code should meet PEP8 standard, the rest can be decided by the developer.")
+    return UserInput(
+        goal="The goal is to get the image of the green cells under IF staining and count the number of cells in the image.",
+        notes="The software should accept user uploaded files, has a simple web interface, the code should meet PEP8 standard, the rest can be decided by the developer."
+    )
 
 async def clarify(query: GetExtraInformation, role: Role) -> UserClarification:
     """Clarify the requirements."""
@@ -69,6 +76,54 @@ async def test_schema_user():
     msg = Message(content=form_dialog.json(), data=form_dialog, role="Boss")
     responses = await user.handle(msg)
     assert isinstance(responses[0].data, UserClarification)
+
+
+@pytest.mark.asyncio
+async def test_tool_call():
+    async def create_user_requirements(query: str, role: Role) -> SoftwareRequirementDocument:
+        """Create user requirements."""
+        def create_sdr(sdr: SoftwareRequirementDocument) -> str:
+            """Create Software Requirement Document."""
+            return "SDR"
+
+        async def get_extra_information(extra_info: GetExtraInformation, hint: str) -> UserInput:
+            """Get Extra Information with hint to the user."""
+            return await get_user_input(extra_info)
+
+        response = await role.acall(query, [create_sdr, get_extra_information], SoftwareRequirementDocument)
+        return response
+        
+    bioimage_analyst = Role(name="Alice",
+                profile="BioImage Analyst",
+                goal="Efficiently communicate with the user and translate the user's needs into software requirements",
+                constraints=None,
+                actions=[create_user_requirements])
+    bioimage_analyst.get_event_bus().register_default_events()
+    responses = await bioimage_analyst.handle(Message(role="Bot", content="Create a segmentation software"))
+    assert isinstance(responses[0].data, SoftwareRequirementDocument)
+
+
+@pytest.mark.asyncio
+async def test_parallel_function_call():
+    async def create_user_requirements(query: str, role: Role) -> SoftwareRequirementDocument:
+        """Create user requirements."""
+        response = await role.aask(query, Union[SoftwareRequirementDocument, GetExtraInformation], use_tool_calls=True)
+        if isinstance(response, SoftwareRequirementDocument):
+            return response
+        elif isinstance(response, GetExtraInformation):
+            user_req = await get_user_input(response)
+            return await role.aask(user_req, SoftwareRequirementDocument)
+        else:
+            raise TypeError(f"response must be SoftwareRequirementDocument or GetExtraInformation, but got {type(response)}")
+
+    bioimage_analyst = Role(name="Alice",
+                profile="BioImage Analyst",
+                goal="Efficiently communicate with the user and translate the user's needs into software requirements",
+                constraints=None,
+                actions=[create_user_requirements])
+    bioimage_analyst.get_event_bus().register_default_events()
+    responses = await bioimage_analyst.handle(Message(role="Bot", content="Create a segmentation software"))
+    assert isinstance(responses[0].data, SoftwareRequirementDocument)
 
 @pytest.mark.asyncio
 async def test_schema_str_input():

@@ -178,16 +178,38 @@ class OpenAIGPTAPI(BaseGPTAPI, RateLimiter):
         collected_chunks = []
         collected_messages = []
         function_call_detected = False
+        tool_call_detected = False
         func_call = {}
+        tool_calls = {}
         query_id = ''.join(random.choices(string.ascii_lowercase + string.digits, k=8))
         session = current_session.get() if current_session in copy_context() else None
         # iterate through the stream of events
         async for chunk in response:
-            chunk = chunk.dict()
             collected_chunks.append(chunk)  # save the event response
+            chunk = chunk.dict()
             chunk_message = chunk['choices'][0]['delta']  # extract the message
             collected_messages.append(chunk_message)  # save the message
-            
+            if chunk["choices"][0].get("finish_reason") == "length":
+                raise RuntimeError("Incomplete model output due to max_tokens parameter or token limit")
+            elif chunk["choices"][0].get("finish_reason") == "content_filter":
+                raise RuntimeError("Omitted content due to a flag from our content filters")
+
+            if "tool_calls" in chunk_message and chunk_message["tool_calls"]:
+                _tool_calls = chunk_message["tool_calls"]
+                for _tool_call in _tool_calls:
+                    if _tool_call['index'] not in tool_calls:
+                        tool_calls[_tool_call['index']] = _tool_call
+                    else:
+                        func_call = tool_calls[_tool_call['index']]['function']
+                        func_call['arguments'] += _tool_call['function']['arguments']
+                        if event_bus:
+                            event_bus.emit("stream", StreamEvent(type="function_call", query_id=query_id, session=session, name=func_call["name"], arguments=_tool_call['function']['arguments'], status="in_progress"))
+                    if _tool_call.get("type") == "function":
+                        func_call = _tool_call.get("function")
+                        if event_bus:
+                            event_bus.emit("stream", StreamEvent(type="function_call", query_id=query_id, session=session, name=func_call["name"], arguments=func_call.get("arguments", ""), status="start"))
+                tool_call_detected = True
+                
             if "function_call" in chunk_message and chunk_message["function_call"]:
                 if "name" in chunk_message["function_call"] and chunk_message["function_call"]["name"]:
                     func_call["name"] = chunk_message["function_call"]["name"]
@@ -197,22 +219,45 @@ class OpenAIGPTAPI(BaseGPTAPI, RateLimiter):
                     if "arguments" not in func_call:
                         func_call["arguments"] = ""
                     func_call["arguments"] += chunk_message["function_call"]["arguments"]
+                    if event_bus:
+                        event_bus.emit("stream", StreamEvent(type="function_call", query_id=query_id, session=session, name=func_call["name"], arguments=chunk_message["function_call"]["arguments"], status="in_progress"))
                 function_call_detected = True
             if event_bus:
                 if function_call_detected:
                     if chunk["choices"][0].get("finish_reason") in ["function_call", "stop"]:
                         event_bus.emit("function_call", func_call)
                         event_bus.emit("stream", StreamEvent(type="function_call", query_id=query_id, session=session, name=func_call["name"], arguments=func_call["arguments"], status="finished"))
-                    elif "function_call" in chunk_message and chunk_message["function_call"].get("arguments"):
-                        event_bus.emit("stream", StreamEvent(type="function_call", query_id=query_id, session=session, name=func_call["name"], arguments=chunk_message["function_call"]["arguments"], status="in_progress"))
+                elif tool_call_detected:
+                    if chunk["choices"][0].get("finish_reason") in ["tool_calls", "stop"]:
+                        for _tool_call in tool_calls.values():
+                            if _tool_call.get("type") == "function":
+                                func_call = _tool_call.get("function")
+                                event_bus.emit("function_call", func_call)
+                                event_bus.emit("stream", StreamEvent(type="function_call", query_id=query_id, session=session, name=func_call["name"], arguments=func_call.get("arguments", ""), status="finished"))
                 elif "content" in chunk_message and chunk_message["content"]:
                     event_bus.emit("stream", StreamEvent(type="text", query_id=query_id, session=session, content=chunk_message["content"], status="in_progress"))
         if function_call_detected:
-            full_reply_content = func_call
+            full_reply_content = full_reply_content = {"type": "function_call", "function_call": func_call}
+            if 'system_fingerprint' in chunk:
+                full_reply_content['system_fingerprint'] = chunk['system_fingerprint']
             usage = self._calc_usage(messages, f"{func_call['name']}({func_call['arguments']})", functions=kwargs.get("functions", None))
+        elif tool_call_detected:
+            full_reply_content = {"type": "tool_calls", "tool_calls": [tool_calls[k] for k in sorted(list(tool_calls.keys()))]}
+            if 'system_fingerprint' in chunk:
+                full_reply_content['system_fingerprint'] = chunk['system_fingerprint']
+            if 'message' in chunk['choices'][0]:
+                full_reply_content['message'] = chunk['choices'][0]['message']
+            _msg = ""
+            for _tool_call in tool_calls.values():
+                func_call = _tool_call['function']
+                _msg += f"{func_call['name']}({func_call['arguments']})\n"
+            tools = kwargs["tools"]
+            functions = [tool['function'] for tool in tools]
+            usage = self._calc_usage(messages, _msg, functions=functions)
         else:
             full_reply_content = ''.join([m.get('content', '') for m in collected_messages if m.get('content')])
             usage = self._calc_usage(messages, full_reply_content, functions=kwargs.get("functions", None))
+            
         self._update_costs(usage)
         if event_bus:
             event_bus.emit("completion", full_reply_content)
@@ -224,7 +269,7 @@ class OpenAIGPTAPI(BaseGPTAPI, RateLimiter):
             "messages": messages,
             "max_tokens": self.get_max_tokens(messages, functions=functions),
             "n": 1,
-            "stop": None,
+            # "stop": None,
             "temperature": self.temperature,
             "timeout": self.timeout,
             "seed": self.seed,
@@ -277,7 +322,12 @@ class OpenAIGPTAPI(BaseGPTAPI, RateLimiter):
         rsp = await self._achat_completion_stream(messages, functions=functions, function_call=function_call, event_bus=event_bus)
         return rsp
 
-    @retry(max_retries=6)
+    async def acompletion_tool(self, messages: list[dict], tools: List[Dict[str, Any]]=None, tool_choice: Union[str, Dict[str, str]]=None, event_bus: EventBus=None) -> dict:
+        # if isinstance(messages[0], Message):
+        #     messages = self.messages_to_dict(messages)
+        rsp = await self._achat_completion_stream(messages, tools=tools, tool_choice=tool_choice, event_bus=event_bus)
+        return rsp
+
     async def acompletion_text(self, messages: list[dict], stream=False, event_bus: EventBus=None) -> str:
         """when streaming, print each token in place."""
         if stream:
