@@ -1,5 +1,6 @@
-"""A simple demo for creating an agent for generating a recipe book based on user's query."""
-import asyncio
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+import pytest
 from schema_agents.role import Role
 from schema_agents.schema import Message
 from pydantic import BaseModel, Field
@@ -22,28 +23,28 @@ class CookBook(BaseModel):
 
 async def respond_to_user(query: str, role: Role = None) -> CookBook:
     """Respond to user's request by recipe book."""
-    # Use role.aask to make query to the agent and create typed outputs
-    # If you want the agent to choose one output type from a list of types, use typing.Union[type1, type2]
-    # If you want the agent to output one or many output types, use [type1, type2]
-    # Use role.acall to create parallel function calls by passing a list of functions, e.g.: role.acall(query, [tool1, tool2], output_schema)
-    response = await role.aask(query, CookBook)
+    response = await role.aask([{"role": "user", "content": [
+        {"type": "text", "text": "Cook something like this"},
+        {
+            "type": "image_url",
+            "image_url": {
+            "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/d/dd/Gfp-wisconsin-madison-the-nature-boardwalk.jpg/2560px-Gfp-wisconsin-madison-the-nature-boardwalk.jpg",
+            },
+        },
+    ]}], str)
     return response
     
-    
-async def main():
+@pytest.mark.asyncio
+async def test_vision():
     alice = Role(
         name="Alice",
         profile="Cooker",
         goal="Your goal is to listen to user's request and propose recipes for making the most delicious meal for thanksgiving.",
         constraints=None,
         actions=[respond_to_user],
+        model="gpt-4-vision-preview",
     )
     event_bus = alice.get_event_bus()
     event_bus.register_default_events()
     responses = await alice.handle(Message(content="make something to surprise our guest from Stockholm.", role="User"))
     print(responses)
-
-if __name__ == "__main__":
-    loop = asyncio.get_event_loop()
-    loop.create_task(main())
-    loop.run_forever()
