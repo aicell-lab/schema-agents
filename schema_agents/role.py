@@ -509,9 +509,9 @@ class Role:
             schema_names = ",".join([f"`{s.__name__}`" for s in output_types])
             avoid_schema_names = ",".join([f"`{s.__name__}`" for s in input_schema])
             if avoid_schema_names:
-                prompt = prompt or f"{prefix}You MUST call one or more of these tools: {schema_names}. DO NOT return text directly or call any of the following tool: {avoid_schema_names}."
+                prompt = prompt or f"{prefix}You MUST call one or more of these functions: {schema_names}. DO NOT return text directly or call any of the following functions: {avoid_schema_names}."
             else:
-                prompt = prompt or f"{prefix}You MUST call one or more of these tools: {schema_names}. DO NOT return text directly."
+                prompt = prompt or f"{prefix}You MUST call one or more of these functions: {schema_names}. DO NOT return text directly."
 
             messages.append({"role": "user", "content": f"{prompt}"})
         elif isinstance(output_schema, typing._UnionGenericAlias):
@@ -520,7 +520,7 @@ class Role:
             schema_names = ",".join([f"`{s.__name__}`" for s in output_types])
             avoid_schema_names = ",".join([f"`{s.__name__}`" for s in input_schema])
             if avoid_schema_names:
-                prompt = prompt or f"{prefix}You MUST call one of these functions: {schema_names}. DO NOT return text directly or call any of the following function: {avoid_schema_names}."
+                prompt = prompt or f"{prefix}You MUST call one of these functions: {schema_names}. DO NOT return text directly or call any of the following functions: {avoid_schema_names}."
             else:
                 prompt = prompt or f"{prefix}You MUST call one of these functions: {schema_names}. DO NOT return text directly."
             messages.append({"role": "user", "content": f"{prompt}"})
