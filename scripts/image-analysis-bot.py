@@ -93,8 +93,8 @@ async def main():
         {"name": "hypha bot", "server_url": SERVER_URL, "token": token}
     )
     # write token into .hypha-token file and save the current time as json file
-    with open(".hypha-token", "w") as f:
-        f.write(json.dumps({"token": token, "time": time.time()}))
+    # with open(".hypha-token", "w", encoding="utf-8") as f:
+    #     f.write(json.dumps({"token": token, "time": time.time()}))
 
     print("Connected to server.", flush=True)
 
