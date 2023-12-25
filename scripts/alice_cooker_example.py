@@ -22,6 +22,10 @@ class CookBook(BaseModel):
 
 async def respond_to_user(query: str, role: Role = None) -> CookBook:
     """Respond to user's request by recipe book."""
+    # Use role.aask to make query to the agent and create typed outputs
+    # If you want the agent to choose one output type from a list of types, use typing.Union[type1, type2]
+    # If you want the agent to output one or many output types, use [type1, type2]
+    # Use role.acall to create parallel function calls by passing a list of functions, e.g.: role.acall(query, [tool1, tool2], output_schema)
     response = await role.aask(query, CookBook)
     return response
     
