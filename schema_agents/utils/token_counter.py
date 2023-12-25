@@ -10,6 +10,7 @@ ref3: https://github.com/hwchase17/langchain/blob/master/langchain/chat_models/o
 """
 import tiktoken
 from math import ceil
+import json
 
 TOKEN_COSTS = {
     "gpt-3.5-turbo": {"prompt": 0.0015, "completion": 0.002},
@@ -21,6 +22,7 @@ TOKEN_COSTS = {
     "gpt-3.5-turbo-16k-0613": {"prompt": 0.003, "completion": 0.004},
     "gpt-4-1106-vision-preview": {"prompt": 0.01, "completion": 0.03},
     "gpt-4-1106-preview": {"prompt": 0.01, "completion": 0.03},
+    "gpt-4-vision-preview": {"prompt": 0.01, "completion": 0.03},
     "gpt-4-0314": {"prompt": 0.03, "completion": 0.06},
     "gpt-4": {"prompt": 0.03, "completion": 0.06},
     "gpt-4-32k": {"prompt": 0.06, "completion": 0.12},
@@ -129,6 +131,8 @@ def count_message_tokens(messages, model="gpt-3.5-turbo-0613", functions=None):
     for message in messages:
         num_tokens += tokens_per_message
         for key, value in message.items():
+            if isinstance(value, (dict, list)):
+                value = json.dumps(value)
             num_tokens += len(encoding.encode(value))
             if key == "name":
                 num_tokens += tokens_per_name

@@ -45,7 +45,7 @@ class BaseGPTAPI(BaseChatbot):
             return rsp.get("choices")[0]["message"].get("function_call")
         return self.get_choice_text(rsp)
 
-    async def aask(self, msg: Union[str, Dict[str, str], List[Dict[str, str]]], system_msgs: Optional[list[str]] = None, functions: List[Dict[str, Any]]=None, function_call: Union[str, Dict[str, str]]=None, event_bus: EventBus=None) -> str:
+    async def aask(self, msg: Union[str, Dict[str, str], List[Dict[str, str]]], system_msgs: Optional[list[str]] = None, functions: List[Dict[str, Any]]=None, function_call: Union[str, Dict[str, str]]=None, event_bus: EventBus=None, use_tool_calls=True) -> str:
         if isinstance(msg, list):
             messages = []
             for m in msg:
@@ -66,7 +66,14 @@ class BaseGPTAPI(BaseChatbot):
         if functions:
             f_names = [f["name"] for f in functions]
             assert len(functions) == len(set(f_names)), f"functions must have unique names, but got {f_names}"
-            rsp = await self.acompletion_function(messages, functions=functions, function_call=function_call, event_bus=event_bus)
+            if use_tool_calls:
+                if isinstance(function_call, dict):
+                    tool_choice = {"type": "function", "function": function_call}
+                else:
+                    tool_choice = function_call
+                rsp = await self.acompletion_tool(messages, tools=[{"type": "function", "function": func} for func in functions], tool_choice=tool_choice, event_bus=event_bus)
+            else:
+                rsp = await self.acompletion_function(messages, functions=functions, function_call=function_call, event_bus=event_bus)
         else:
             rsp = await self.acompletion_text(messages, stream=True, event_bus=event_bus)
         # logger.debug(message)
