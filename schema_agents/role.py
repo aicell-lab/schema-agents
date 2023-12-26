@@ -12,7 +12,7 @@ import typing
 from functools import partial
 from inspect import signature
 from typing import Iterable, Optional, Union, Callable
-from pydantic import BaseModel, create_model, Field
+from pydantic import BaseModel, create_model, Field, ValidationError
 
 from schema_agents.logs import logger
 from schema_agents.utils import parse_special_json, schema_to_function
@@ -20,7 +20,6 @@ from schema_agents.llm import LLM
 from schema_agents.schema import Message, RoleSetting, Session
 from schema_agents.memory.long_term_memory import LongTermMemory
 from schema_agents.utils.common import EventBus
-from pydantic import BaseModel
 from schema_agents.utils.common import current_session
 from contextlib import asynccontextmanager
 from contextvars import copy_context
@@ -365,7 +364,20 @@ class Role:
                 ], f"Invalid function name: {func_call['name']}"
                 idx = [s.__name__ for s in output_types].index(func_call["name"])
                 arguments = parse_special_json(func_call["arguments"])
-                functions.append(output_types[idx].parse_obj(arguments))
+                model = output_types[idx]
+                try:
+                    fargs = model.parse_obj(arguments)
+                except ValidationError:
+                    model_schema = model.schema()
+                    keys = model_schema["properties"].keys()
+                    # only one argument
+                    if len(keys) == 1:
+                        fargs = model.parse_obj(
+                            {list(keys)[0]: arguments}
+                        )
+                    else:
+                        raise
+                functions.append(fargs)
                 ids.append(tool_call["id"])
             if not parallel_call:
                 functions = functions[0]
