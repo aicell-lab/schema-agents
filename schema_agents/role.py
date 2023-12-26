@@ -433,10 +433,13 @@ class Role:
 
                 promises.append(loop.run_in_executor(None, wrap_func))
         results = await asyncio.gather(*promises)
+
         extra_schemas = []
+        result_dict = {}
         for call_id, result in enumerate(results):
             fargs = tool_calls[call_id]
             idx = tool_inputs_models.index(fargs.__class__)
+            result_dict[tools[idx]] = result
             if isinstance(result, BaseModel):
                 extra_schemas.append(result.__class__)
             messages.append(
@@ -449,6 +452,10 @@ class Role:
                     else str(result),
                 }
             )  # extend conversation with function response
+
+        if not output_schema:
+            return result_dict
+
         return await self.aask(
             messages,
             output_schema=output_schema,

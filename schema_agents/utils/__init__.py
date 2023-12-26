@@ -57,7 +57,7 @@ def apply_patch(original_text, patch_text):
     result = subprocess.run(['patch', original_path, patch_path], capture_output=True)
 
     # Read the patched content from the original file
-    with open(original_path, 'r') as file:
+    with open(original_path, 'r', encoding="utf-8") as file:
         patched_text = file.read()
 
     # Clean up the temporary files
