@@ -364,6 +364,8 @@ class Role:
                 ], f"Invalid function name: {func_call['name']}"
                 idx = [s.__name__ for s in output_types].index(func_call["name"])
                 arguments = parse_special_json(func_call["arguments"])
+                if len(arguments.keys()) == 1 and "_" in arguments.keys():
+                    arguments = arguments["_"]
                 model = output_types[idx]
                 try:
                     fargs = model.parse_obj(arguments)
