@@ -545,7 +545,7 @@ class Role:
             response = await self._llm.aask(
                 messages,
                 system_msgs,
-                functions=input_schema,
+                functions=[schema_to_function(s) for s in input_schema],
                 function_call=function_call,
                 event_bus=self._event_bus,
             )
