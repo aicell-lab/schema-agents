@@ -77,6 +77,21 @@ async def test_schema_user():
     responses = await user.handle(msg)
     assert isinstance(responses[0].data, UserClarification)
 
+@pytest.mark.asyncio
+async def test_str_streaming():
+    async def create_user_requirements(query: str, role: Role) -> str:
+        """Create user requirements."""
+        return await role.aask(query, str)
+
+    bioimage_analyst = Role(name="Alice",
+                profile="BioImage Analyst",
+                goal="Efficiently communicate with the user and translate the user's needs into software requirements",
+                constraints=None,
+                actions=[create_user_requirements])
+    bioimage_analyst.get_event_bus().register_default_events()
+    responses = await bioimage_analyst.handle(Message(role="Bot", content="What can you do for me?"))
+    assert isinstance(responses[0].content, str)
+
 
 @pytest.mark.asyncio
 async def test_tool_call():
