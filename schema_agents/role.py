@@ -94,6 +94,10 @@ class Role:
             )
         self._init_actions(self._actions)
 
+    @property
+    def llm(self):
+        return self._llm
+
     def _reset(self):
         self._states = []
         self._actions = []
@@ -284,7 +288,7 @@ class Role:
                 else:
                     assert isinstance(
                         response, BaseModel
-                    ), f"Action must return pydantic BaseModel, but got {response}"
+                    ), f"Action must return str or pydantic BaseModel, but got {response}"
                     output = Message(
                         content=response.json(),
                         data=response,
