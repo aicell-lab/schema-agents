@@ -529,7 +529,7 @@ class Role:
             assert (
                 use_tool_calls
             ), "Please set `use_tool_calls` to True when passing a list of output schemas."
-            output_types = output_schema
+            output_types = list(output_schema)
             parallel_call = True
             schema_names = ",".join([f"`{s.__name__}`" for s in output_types])
             avoid_schema_names = ",".join([f"`{s.__name__}`" for s in input_schema])
