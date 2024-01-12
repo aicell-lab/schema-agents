@@ -1,0 +1,18 @@
+{
+    "name": "IngredientCategories",
+    "fields": [
+        {
+            "field_name": "categories",
+            "field_type": "dict"
+        },
+        {
+            "field_name": "potential_dish_types",
+            "field_type": "list"
+        }
+    ],
+    "field_descriptions": [
+        "A dictionary mapping each ingredient to its food group category.",
+        "A list of dish types that can be made with the combination of ingredient categories."
+    ],
+    "class_description": "A schema holding categorized ingredients and suggested dish types for recipe generation."
+}

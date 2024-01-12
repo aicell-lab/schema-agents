@@ -1,0 +1,36 @@
+{
+    "title": "IngredientAnalysis",
+    "description": "A structured analysis of the ingredients that includes potential cuisine types, dietary restrictions, and flavor profiles.",
+    "type": "object",
+    "properties": {
+        "cuisine_types": {
+            "title": "Cuisine Types",
+            "description": "Possible cuisine types that can be made with the ingredients.",
+            "type": "array",
+            "items": {
+                "type": "string"
+            }
+        },
+        "dietary_restrictions": {
+            "title": "Dietary Restrictions",
+            "description": "Any dietary restrictions that apply to the ingredients, such as gluten-free or vegan.",
+            "type": "array",
+            "items": {
+                "type": "string"
+            }
+        },
+        "flavor_profiles": {
+            "title": "Flavor Profiles",
+            "description": "The general flavor profiles that can be achieved with the ingredients, like savory, sweet, spicy, etc.",
+            "type": "array",
+            "items": {
+                "type": "string"
+            }
+        }
+    },
+    "required": [
+        "cuisine_types",
+        "dietary_restrictions",
+        "flavor_profiles"
+    ]
+}

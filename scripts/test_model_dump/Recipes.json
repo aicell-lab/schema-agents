@@ -1,0 +1,1 @@
+{"title": "Recipes", "description": "A schema containing a list of possible recipes generated from the categorized ingredients.", "type": "object", "properties": {"recipe_list": {"title": "Recipe List", "description": "A list of recipes, each containing the name, instructions, and required ingredient amounts.", "type": "array", "items": {}}}, "required": ["recipe_list"]}
