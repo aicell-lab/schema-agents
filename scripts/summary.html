@@ -5,15 +5,17 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Study Summaries</title>
 <style>
-body { font-family: Arial, sans-serif; margin: 0; padding: 0; }
+body { font-family: Arial, sans-serif; margin: 0; padding: 0; background: #f4f4f4; }
 .container { max-width: 1200px; margin: auto; padding: 20px; }
-h1 { text-align: center; }
-.experiment { margin-bottom: 40px; }
+h1 { color: #333; }
+.experiment { background: #fff; margin-bottom: 20px; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
 .experiment-header { margin-bottom: 20px; }
 .experiment-materials, .experiment-protocol { margin-bottom: 10px; }
+.materials-list, .protocol-steps { margin-top: 10px; }
+.materials-list li, .protocol-steps li { margin-bottom: 5px; }
 .diagram { margin-top: 20px; }
 </style>
-<script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10.0.0/dist/mermaid.min.js"></script>
 <script>mermaid.initialize({ startOnLoad: true });</script>
 </head>
 <body>
@@ -21,67 +23,113 @@ h1 { text-align: center; }
 <h1>Suggested Study Summaries</h1>
 
 <div class="experiment">
-<h2 class="experiment-header">Assessment of Hematological Biomarkers in a Prospective Cohort</h2>
-<p class="experiment-materials"><strong>Materials:</strong> Human subjects with occupational lead exposure, Control group of healthy individuals, Blood samples, Hematological analysis equipment, Logistic regression software</p>
-<p class="experiment-protocol"><strong>Protocol:</strong> Recruit subjects with documented occupational lead exposure and healthy controls, Collect blood samples from all subjects, Perform comprehensive hematological analysis, Develop a new logistic regression model incorporating novel biomarkers, Validate the model using ROC curve analysis</p>
-<p class="experiment-expected-results"><strong>Expected Results:</strong> Identification of new hematological biomarkers with predictive value for lead poisoning</p>
-<div class="diagram"><div class="mermaid">
-graph TD
-A[Control Group] -->|Blood Biomarkers| B[Low Risk]
-A -->|Blood Biomarkers| C[High Risk]
-D[Exposed Group] -->|Blood Biomarkers| E[High Risk]
-D -->|Blood Biomarkers| F[Potential High Risk]
-style B fill:#4CAF50
-style C fill:#f44336
-style E fill:#f44336
-style F fill:#ffeb3b
-</div></div>
+<h2 class="experiment-header">Investigating the Role of mmu_circ_26984 in Aniline-Induced Hepatotoxicity</h2>
+<div class="experiment-materials">
+<strong>Materials:</strong>
+<ul class="materials-list">
+<li>Aniline</li>
+<li>N-acetylcysteine (NAC)</li>
+<li>AML12 cells</li>
+<li>C57BL/6 mice</li>
+<li>RNA extraction kits</li>
+<li>RT-qPCR reagents</li>
+<li>Western blot materials</li>
+<li>Immunohistochemistry kits</li>
+<li>Fluorescence in situ hybridization (FISH) probes</li>
+<li>CircRNA microarray kits</li>
+</ul>
 </div>
-
-<div class="experiment">
-<h2 class="experiment-header">Elucidating the Role of NRF2 in Neuronal Defense Mechanisms</h2>
-<p class="experiment-materials"><strong>Materials:</strong> Human neural progenitor cells (NPCs), Lead (Pb) and arsenic (As) compounds, NRF2 inhibitors and activators, ChIP-qPCR assay materials, Gene expression analysis tools</p>
-<p class="experiment-protocol"><strong>Protocol:</strong> Culture NPCs and expose them to Pb and As, Apply NRF2 inhibitors and activators to assess their impact on gene expression, Perform ChIP-qPCR to confirm NRF2 binding on target gene promoters, Analyze gene expression changes and correlate with neuronal cell function assays, Compare gene expression profiles with those from ASD patient-derived NPCs</p>
-<p class="experiment-expected-results"><strong>Expected Results:</strong> Understanding of NRF2's role in protecting NPCs from metal-induced damage</p>
-<div class="diagram"><div class="mermaid">
-graph TD
-A[Without NRF2 Activation] -->|Neuronal Damage| B[High]
-A -->|Gene Expression| C[Altered]
-D[With NRF2 Activation] -->|Neuronal Damage| E[Low]
-D -->|Gene Expression| F[Normal]
-style B fill:#f44336
-style C fill:#ffeb3b
-style E fill:#4CAF50
-style F fill:#4CAF50
-</div></div>
+<div class="experiment-protocol">
+<strong>Protocol:</strong>
+<ul class="protocol-steps">
+<li>Treat AML12 cells and C57BL/6 mice with aniline to induce hepatotoxicity.</li>
+<li>Administer NAC to a subset of aniline-treated cells and mice to assess its protective effect.</li>
+<li>Perform circRNA microarray analysis to identify differentially expressed circRNAs.</li>
+<li>Use RNA pulldown, LC-MS, and RNA immunoprecipitation to study the interaction between mmu_circ_26984 and Myh9.</li>
+<li>Conduct RT-qPCR, Western blot, and immunohistochemistry to analyze gene and protein expression.</li>
+<li>Apply FISH to visualize the localization of mmu_circ_26984 in liver tissues.</li>
+</ul>
 </div>
-
-<div class="experiment">
-<h2 class="experiment-header">Evaluating the Protective Effects of Asparagus officinalis on Lead-Induced Hepatotoxicity</h2>
-<p class="experiment-materials"><strong>Materials:</strong> Male mice, Lead acetate (LA), Asparagus officinalis extract (AOE), Kidney function assay kits, Antioxidant assay kits, Inflammatory cytokine assay kits</p>
-<p class="experiment-protocol"><strong>Protocol:</strong> Divide male mice into four groups: control, LA exposure, LA exposure with AOE pretreatment, and AOE only, Administer LA and AOE according to group assignment, Assess kidney function and biomarkers at multiple time points, Measure antioxidant levels and inflammatory cytokines, Perform histopathological examination of kidney tissues</p>
-<p class="experiment-expected-results"><strong>Expected Results:</strong> Confirmation of AOE's nephroprotective effects against lead-induced renal toxicity</p>
-<div class="diagram"><div class="mermaid">
+<div class="diagram">
+<div class="mermaid">
 graph TD
-A[Control Group] -->|Kidney Function| B[Normal]
-A -->|Antioxidant Levels| C[Normal]
-A -->|Inflammatory Cytokines| D[Low]
-E[LA Exposure] -->|Kidney Function| F[Impaired]
-E -->|Antioxidant Levels| G[Decreased]
-E -->|Inflammatory Cytokines| H[High]
-I[LA + AOE] -->|Kidney Function| J[Improved]
-I -->|Antioxidant Levels| K[Increased]
-I -->|Inflammatory Cytokines| L[Decreased]
-style B fill:#4CAF50
-style C fill:#4CAF50
+A[Aniline Exposure] -->|With NAC| B[Reduced Hepatotoxicity]
+A -->|Without NAC| C[Increased Hepatotoxicity]
+B --> D[Normal mmu_circ_26984 Levels]
+C --> E[Elevated mmu_circ_26984 Levels]
 style D fill:#4CAF50
-style F fill:#f44336
-style G fill:#f44336
-style H fill:#f44336
-style J fill:#4CAF50
-style K fill:#4CAF50
-style L fill:#4CAF50
-</div></div>
+style E fill:#f44336
+</div>
+</div>
+</div>
+
+<div class="experiment">
+<h2 class="experiment-header">Assessment of Hematological Biomarkers for Lead Poisoning Prediction</h2>
+<div class="experiment-materials">
+<strong>Materials:</strong>
+<ul class="materials-list">
+<li>Human blood samples</li>
+<li>Lead standards</li>
+<li>Hematological analyzer</li>
+<li>Logistic regression software</li>
+<li>ROC curve analysis software</li>
+</ul>
+</div>
+<div class="experiment-protocol">
+<strong>Protocol:</strong>
+<ul class="protocol-steps">
+<li>Collect blood samples from individuals with occupational lead poisoning and healthy controls.</li>
+<li>Analyze hematological parameters using a hematological analyzer.</li>
+<li>Develop a logistic regression model incorporating RDW-CV, NLR, and Micro% to predict lead poisoning.</li>
+<li>Evaluate the diagnostic value of the model using ROC curve analysis.</li>
+<li>Compare the sensitivity and specificity of the model to existing diagnostic methods.</li>
+</ul>
+</div>
+<div class="diagram">
+<div class="mermaid">
+pie title Hematological Biomarkers for Lead Poisoning
+"RDW-CV" : 35
+"NLR" : 30
+"Micro%" : 25
+"Other Parameters" : 10
+</div>
+</div>
+</div>
+
+<div class="experiment">
+<h2 class="experiment-header">Elucidating the Impact of Pb and As on NRF2-Target Genes in Neural Progenitor Cells</h2>
+<div class="experiment-materials">
+<strong>Materials:</strong>
+<ul class="materials-list">
+<li>Human neural progenitor cells (NPCs)</li>
+<li>Lead (Pb) and arsenic (As) compounds</li>
+<li>ChIP-qPCR assay materials</li>
+<li>RNA extraction kits</li>
+<li>RT-qPCR reagents</li>
+<li>Western blot materials</li>
+<li>Transcriptomic analysis software</li>
+</ul>
+</div>
+<div class="experiment-protocol">
+<strong>Protocol:</strong>
+<ul class="protocol-steps">
+<li>Expose human NPCs to Pb and As to induce oxidative stress.</li>
+<li>Perform ChIP-qPCR assays to confirm NRF2 binding to the promoter regions of F2RL2, TRIM16L, and PANX2.</li>
+<li>Analyze gene expression changes using RT-qPCR.</li>
+<li>Assess protein levels with Western blot.</li>
+<li>Compare transcriptomic profiles of NPCs from ASD patients with those exposed to Pb and As.</li>
+</ul>
+</div>
+<div class="diagram">
+<div class="mermaid">
+graph TD
+A[Pb and As Exposure] --> B[Oxidative Stress in NPCs]
+B --> C[Increased NRF2 Activity]
+C --> D[Upregulated Target Genes]
+D --> E[Impaired Neuronal Functions]
+style E fill:#f44336
+</div>
+</div>
 </div>
 
 </div>
