@@ -14,10 +14,12 @@ class OverallPlan(BaseModel):
     """The plan for how to analyze the NCBI GEO series given an input _series_matrix.txt file."""
     data_overview: str = Field(..., description="A description of the data: what files are available, how they were generated, and what they mean.")
     analysis_steps: str = Field(..., description="A detailed description of the analysis steps to process the data.")
+    snake_make_contents: str = Field(..., description="The contents of a Snakemake file encapsulating the analysis steps to process the data.")
 
 class InformaticsPlanDraft(BaseModel):
     """The detailed informatics comprehensive analysis plan for how to analyze the NCBI GEO series data from start (package installation) to finish."""
     informatics_steps: list[str] = Field(..., description="A list of the informatics steps to process the data.")
+    snake_make_contents: str = Field(..., description="The updated contents of a Snakemake file encapsulating the informatics steps to process the data.")
 
 class InformaticsPlan(InformaticsPlanDraft):
     """The detailed informatics comprehensive analysis plan for how to analyze the NCBI GEO series data from start (package installation) to finish."""
@@ -27,9 +29,17 @@ class Dependencies(BaseModel):
     """All of the software dependencies for the informatics comprehensive analysis plan."""
     dependencies: str = Field(..., description="The dependencies for the informatics comprehensive analysis plan in the format of a conda environment file.")
 
+class InformaticsPlanWithDependencies(InformaticsPlan, Dependencies):
+    """The detailed informatics comprehensive analysis plan and dependencies for how to analyze the NCBI GEO series data from start (package installation) to finish."""
+    pass
+
 class InformaticsWorkflow(BaseModel):
     """The entire executable workflow for how to analyze the NCBI GEO series data from start (package installation) to finish in the form of a Snakemake workflow."""
-    workflow: str = Field(..., description="The entire executable workflow for how to analyze the NCBI GEO series data from start (package installation) to finish in the form of a Snakemake workflow.")
+    snake_make_contents: str = Field(..., description="The updated contents of a Snakemake file encapsulating the informatics steps to process the data ensuring that all steps have been completely filled out")
+
+class SnakeMakeFile(BaseModel):
+    """The finalized Snakemake file."""
+    contents: str = Field(..., description="The contents of the Snakemake file.")
 
 async def make_overall_plan(matrix_file_path: str, role: Role = None) -> OverallPlan:
     """Make the overall plan for how to analyze the NCBI GEO series given an input _series_matrix.txt file."""
@@ -66,14 +76,15 @@ async def make_informatics_workflow(informatics_plan: InformaticsPlan, role: Rol
     """Take the informatics plan and make a detailed step-by-step informatics workflow."""
 
     dependencies = await internal_make_dependencies(informatics_plan)
-    result = await role.aask((informatics_plan, dependencies), InformaticsWorkflow)
+    informatics_plan_with_dependencies = InformaticsPlanWithDependencies(informatics_steps = informatics_plan.informatics_steps, snake_make_contents = informatics_plan.snake_make_contents, dependencies = dependencies.dependencies)
+    result = await role.aask(informatics_plan_with_dependencies, InformaticsWorkflow)
     return(result)
 
-async def make_snakemake_file(informatics_workflow: InformaticsWorkflow, role: Role = None) -> str:
+async def make_snakemake_file(informatics_workflow: InformaticsWorkflow, role: Role = None) -> SnakeMakeFile:
     """Take the informatics workflow and make a Snakemake file."""
-    result = await role.aask(informatics_workflow, str)
+    result = await role.aask(informatics_workflow, SnakeMakeFile)
     with open("Snakefile", "w") as f:
-        f.write(result)
+        f.write(result.contents)
     return(result)
 
 
@@ -81,6 +92,8 @@ async def make_snakemake_file(informatics_workflow: InformaticsWorkflow, role: R
 # Main function
 async def main():
     agents = []
+
+
     dataset_director = Role(
         name="dataset_director",
         profile="The dataset director responsible for directing the analysis of a GEO dataset",
