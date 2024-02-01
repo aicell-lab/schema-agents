@@ -33,10 +33,12 @@ async def fun_2(type_1: Type1, role: Role = None) -> Type2:
     result = Type2(b = "b")
     return(result)
 
-async def fun_3(input : Union[Type1, Type2], role: Role = None) -> Type3:
+async def fun_3(input_1 : Type1, role: Role = None) -> Type3:
     """Test function 3"""
+    input_2 = await fun_2(input_1)
+    input = (input_1, input_2)
     print(input)
-    return(Type3(a = "placeholder_a", b = "placeholder_b"))
+    return(Type3(a = input_1.a, b = input_2.b))
 
 
 # Main function
@@ -47,7 +49,7 @@ async def main():
         profile="A test agent",
         goal="To test stuff",
         constraints=None,
-        actions=[fun_1, fun_2, fun_3],
+        actions=[fun_1, fun_3],
     )
     agents.append(input_interpreter)
 
