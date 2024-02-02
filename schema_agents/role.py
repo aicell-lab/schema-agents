@@ -19,6 +19,7 @@ from schema_agents.utils import parse_special_json, schema_to_function
 from schema_agents.llm import LLM
 from schema_agents.schema import Message, RoleSetting, Session
 from schema_agents.memory.long_term_memory import LongTermMemory
+from schema_agents.utils import dict_to_pydantic_model
 from schema_agents.utils.common import EventBus
 from schema_agents.utils.common import current_session
 from contextlib import asynccontextmanager
@@ -37,19 +38,6 @@ async def create_session_context(id=None, role_setting=None):
     yield copy_context()
     current_session.set(pre_session)
 
-
-def dict_model(name: str, dict_def: dict, doc: str = None):
-    fields = {}
-    for field_name, value in dict_def.items():
-        if isinstance(value, tuple):
-            fields[field_name] = value
-        elif isinstance(value, dict):
-            fields[field_name] = (dict_model(f"{name}_{field_name}", value), ...)
-        else:
-            raise ValueError(f"Field {field_name}:{value} has invalid syntax")
-    model = create_model(name, **fields)
-    model.__doc__ = doc
-    return model
 
 
 class Role:
@@ -422,7 +410,7 @@ class Role:
                     )
             tool_output_models.append(sig.return_annotation)
             tool_inputs_models.append(
-                dict_model(
+                dict_to_pydantic_model(
                     tool.__name__,
                     {names[i]: (types[i], defaults[i]) for i in range(len(names))},
                     tool.__doc__,
