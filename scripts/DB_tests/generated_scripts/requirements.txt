@@ -1,0 +1,9 @@
+pandas
+gzip
+pandas
+pandas
+rpy2
+seaborn
+matplotlib
+pandas
+numpy
