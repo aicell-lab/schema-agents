@@ -26,7 +26,7 @@ async def test_logprobs():
         goal="Your goal is to listen to user's request and propose recipes for making the most delicious meal for thanksgiving.",
         constraints=None,
         actions=[respond_to_user],
-        model="gpt-4-1106-preview",
+        model="gpt-4-turbo-preview",
     )
     event_bus = alice.get_event_bus()
     event_bus.register_default_events()
