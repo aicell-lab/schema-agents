@@ -33,6 +33,14 @@ class HypothesisWorkflow(BaseModel):
 class AnalysisOptions(BaseModel):
     """The possible hypotheses you could test using ONLY the data in the repository"""
     options: list[HypothesisWorkflow] = Field(..., description="All the possible hypotheses you could test and how to test them in pseudo-code format")
+
+class PseudoWorkflow(HypothesisWorkflow):
+    """A workflow in pseudo-code format"""
+    workflow: str = Field(..., description="A workflow in precise pseudo-code format. EVERY step must be included, including installing dependencies and downloading data")
+
+class PseudoWorkflows(BaseModel):
+    """The analysis options in pseudo-code format"""
+    options: list[PseudoWorkflow] = Field(..., description="A list of pseudocode-workflows")
     
 
 async def scan_matrix(matrix_path : str, role : Role = None) -> DataDescription:
@@ -49,6 +57,16 @@ async def evaluate_analysis_options(data_description : DataDescription, role : R
         print(hypothesis)
     return(result)
 
+async def write_pseudo_workflows(analysis_options : AnalysisOptions, role : Role = None) -> PseudoWorkflows:
+    """Writes the analysis options in pseudo-code format"""
+    # pseudo_workflows = []
+    tasks = [role.aask(hypothesis_workflow, PseudoWorkflow) for hypothesis_workflow in analysis_options.options]
+    pseudo_workflows = await asyncio.gather(*tasks)
+    # for hypothesis in analysis_options.options:
+        # pseudo_workflow = await role.aask(hypothesis, PseudoWorkflow)
+        # pseudo_workflows.append(pseudo_workflow.workflow)
+    return(PseudoWorkflows(options=pseudo_workflows))
+
 class WorkflowScript(BaseModel):
     """A workflow script"""
     filename: str = Field(..., description="The filename of the script. It should contain no spaces (only underscores) and end in .nf")
@@ -58,12 +76,17 @@ class WorkflowScripts(BaseModel):
     """A list of workflow scripts"""
     scripts: List[WorkflowScript] = Field(..., description="A list of workflow scripts")
 
-async def write_workflow_scripts(analysis_options : AnalysisOptions, role : Role = None) -> WorkflowScripts:
+async def write_workflow_scripts(pseudo_workflows : PseudoWorkflows, role : Role = None) -> WorkflowScripts:
     """Writes the workflow scripts to test the proposed hypotheses"""
-    nextflow_scripts = []
-    for hypothesis in analysis_options.options:
-        nextflow_script = await role.aask(hypothesis, WorkflowScript)
-        nextflow_scripts.append(nextflow_script)
+    # nextflow_scripts = []
+    # for hypothesis in analysis_options.options:
+    #     nextflow_script = await role.aask(hypothesis, WorkflowScript)
+    #     nextflow_scripts.append(nextflow_script)
+    #     with open(nextflow_script.filename, "w") as file:
+    #         file.write(nextflow_script.script)
+    tasks = [role.aask(pseudocode_workflow, WorkflowScript) for pseudocode_workflow in pseudo_workflows.options]
+    nextflow_scripts = await asyncio.gather(*tasks)
+    for nextflow_script in nextflow_scripts:
         with open(nextflow_script.filename, "w") as file:
             file.write(nextflow_script.script)
     return(WorkflowScripts(scripts=nextflow_scripts))
@@ -78,12 +101,17 @@ class ScriptReviews(BaseModel):
 
 async def review_scripts(workflow_scripts : WorkflowScripts, role : Role = None) -> ScriptReviews:
     """Read over each script and check if it is completely self-contained and executable from start to finish. If not, add the necessary code to make it so. If it is, simply copy the script"""
-    script_reviews = []
-    for script in workflow_scripts.scripts:
-        with open(script.filename, 'r') as file:
-            script_contents = file.read()
-            script_review = await role.aask(script_contents, ScriptReview)
-        script_reviews.append(script_review)
+    # script_reviews = []
+    # for script in workflow_scripts.scripts:
+    #     with open(script.filename, 'r') as file:
+    #         script_contents = file.read()
+    #         script_review = await role.aask(script_contents, ScriptReview)
+    #     script_reviews.append(script_review)
+    tasks = [role.aask(script, ScriptReview) for script in workflow_scripts.scripts]
+    script_reviews = await asyncio.gather(*tasks)
+    for script_review in script_reviews:
+        with open(script_review.filename, "w") as file:
+            file.write(script_review.script)
     return(ScriptReviews(reviews=script_reviews))
 
 class RevisedScript(WorkflowScript):
@@ -92,8 +120,13 @@ class RevisedScript(WorkflowScript):
 
 async def revise_scripts(script_reviews : ScriptReviews, role : Role = None) -> None:
     """Revise each script to be completely self-contained and executable using the script reviews"""
-    for script in script_reviews.reviews:
-        revised_script = await role.aask(script, RevisedScript)
+    # for script in script_reviews.reviews:
+    #     revised_script = await role.aask(script, RevisedScript)
+    #     with open(revised_script.filename, "w") as file:
+    #         file.write(revised_script.script)
+    tasks = [role.aask(script, RevisedScript) for script in script_reviews.reviews]
+    revised_scripts = await asyncio.gather(*tasks)
+    for revised_script in revised_scripts:
         with open(revised_script.filename, "w") as file:
             file.write(revised_script.script)
 
@@ -105,6 +138,7 @@ def make_team():
         profile="An agent that scans for available data",
         goal="To comprehensively scan for available data",
         constraints=None,
+        model = "gpt-4-0125-preview",
         actions=[scan_matrix, evaluate_analysis_options],
     )
     agents.append(data_scanner)
@@ -114,7 +148,8 @@ def make_team():
         profile="An agent that writes code",
         goal="To write code that is complete, self-contained, and error-free",
         constraints=None,
-        actions=[write_workflow_scripts, revise_scripts],
+        model = "gpt-4-0125-preview",
+        actions=[write_pseudo_workflows, write_workflow_scripts, revise_scripts],
     )
     agents.append(code_writer)
 
@@ -123,11 +158,12 @@ def make_team():
         profile="An agent that reviews code",
         goal="To check that the code is completely self-contained and executable and to suggest necessary changes to make it so",
         constraints=None,
+        model = "gpt-4-0125-preview",
         actions=[review_scripts],
     )
     agents.append(code_reviewer)
 
-    team = Team(name="NCBI GEO analyzers", profile="A team of agents meant to comprehensively understand and analyze an NCBI GEO repository", investment=0.7)
+    team = Team(name="NCBI GEO analyzers", profile="A team of agents meant to comprehensively understand and analyze a NCBI GEO repository", investment=0.7)
 
     team.hire(agents)
     event_bus = team.get_event_bus()
