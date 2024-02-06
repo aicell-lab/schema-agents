@@ -66,7 +66,7 @@ async def write_scripts(architecture : CodeArchitecture, role : Role = None) -> 
         project_scripts.append(script)
     with open(os.path.join(output_dir, "requirements.txt"), "w") as file:
         file.write("\n".join(list(set(dependencies))))
-    return(ProjectScripts(scripts=project_scripts)
+    return(ProjectScripts(scripts=project_scripts))
 
 
 def make_team():
