@@ -23,7 +23,6 @@ TOKEN_COSTS = {
     "gpt-3.5-turbo-16k-0613": {"prompt": 0.003, "completion": 0.004},
     "gpt-4-turbo-preview": {"prompt": 0.01, "completion": 0.03},
     "gpt-4-0125-preview": {"prompt": 0.01, "completion": 0.03},
-    "gpt-4-1106-vision-preview": {"prompt": 0.01, "completion": 0.03},
     "gpt-4-1106-preview": {"prompt": 0.01, "completion": 0.03},
     "gpt-4-vision-preview": {"prompt": 0.01, "completion": 0.03},
     "gpt-4-1106-vision-preview": {"prompt": 0.01, "completion": 0.03},
