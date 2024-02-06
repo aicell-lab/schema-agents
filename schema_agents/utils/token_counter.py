@@ -14,13 +14,17 @@ from math import ceil
 TOKEN_COSTS = {
     "gpt-3.5-turbo": {"prompt": 0.0015, "completion": 0.002},
     "gpt-3.5-turbo-instruct": {"prompt": 0.0015, "completion": 0.002},
+    "gpt-3.5-turbo-0125": {"prompt": 0.0005, "completion": 0.0015},
     "gpt-3.5-turbo-1106": {"prompt": 0.0010, "completion": 0.002},
     "gpt-3.5-turbo-0301": {"prompt": 0.0015, "completion": 0.002},
     "gpt-3.5-turbo-0613": {"prompt": 0.0015, "completion": 0.002},
     "gpt-3.5-turbo-16k": {"prompt": 0.003, "completion": 0.004},
     "gpt-3.5-turbo-16k-0613": {"prompt": 0.003, "completion": 0.004},
-    "gpt-4-1106-vision-preview": {"prompt": 0.01, "completion": 0.03},
+    "gpt-4-turbo-preview": {"prompt": 0.01, "completion": 0.03},
+    "gpt-4-0125-preview": {"prompt": 0.01, "completion": 0.03},
     "gpt-4-1106-preview": {"prompt": 0.01, "completion": 0.03},
+    "gpt-4-vision-preview": {"prompt": 0.01, "completion": 0.03},
+    "gpt-4-1106-vision-preview": {"prompt": 0.01, "completion": 0.03},
     "gpt-4-0314": {"prompt": 0.03, "completion": 0.06},
     "gpt-4": {"prompt": 0.03, "completion": 0.06},
     "gpt-4-32k": {"prompt": 0.06, "completion": 0.12},
@@ -33,9 +37,12 @@ TOKEN_COSTS = {
 TOKEN_MAX = {
     "gpt-3.5-turbo": 4096,
     "gpt-3.5-turbo-instruct": 4096,
+    "gpt-3.5-turbo-0125": 16384,
     "gpt-3.5-turbo-1106": 16384,
     "gpt-3.5-turbo-0301": 4096,
     "gpt-3.5-turbo-0613": 4096,
+    "gpt-4-turbo-preview": 128000,
+    "gpt-4-0125-preview": 128000,
     "gpt-3.5-turbo-16k": 16384,
     "gpt-3.5-turbo-16k-0613": 16384,
     "gpt-4-0314": 8192,
@@ -45,6 +52,7 @@ TOKEN_MAX = {
     "gpt-4-0613": 8192,
     "gpt-4-1106-preview": 128000,
     "gpt-4-1106-vision-preview": 128000,
+    "gpt-4-vision-preview": 128000,
     "text-embedding-ada-002": 8192,
 }
 
@@ -102,6 +110,7 @@ def count_message_tokens(messages, model="gpt-3.5-turbo-0613", functions=None):
         "gpt-3.5-turbo-instruct",
         "gpt-3.5-turbo-1106",
         "gpt-3.5-turbo-0613",
+        "gpt-3.5-turbo-0125",
         "gpt-3.5-turbo-16k-0613",
         "gpt-4-0314",
         "gpt-4-32k-0314",
@@ -109,6 +118,9 @@ def count_message_tokens(messages, model="gpt-3.5-turbo-0613", functions=None):
         "gpt-4-32k-0613",
         "gpt-4-1106-preview",
         "gpt-4-1106-vision-preview",
+        "gpt-4-turbo-preview",
+        "gpt-4-vision-preview",
+        "gpt-4-0125-preview",
     }:
         tokens_per_message = 3
         tokens_per_name = 1
