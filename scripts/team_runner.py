@@ -9,6 +9,7 @@ import logging
 class DualLogger:
     def __init__(self, filepath, mode = 'w'):
         self.terminal = sys.stdout
+        os.makedirs(os.path.dirname(filepath), exist_ok=True)
         self.log = open(filepath, mode)
     
     def write(self, message):
@@ -24,6 +25,9 @@ class DualLogger:
 async def run_team(module_name, user_request):
     module = importlib.import_module(module_name)
     team = module.make_team()
+
+    event_bus = team.get_event_bus()
+    event_bus.register_default_events()
     responses = await team.handle(Message(content=user_request, role="User"))
     print(responses)
 

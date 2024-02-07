@@ -1,0 +1,1 @@
+{"description": "A schema representing the generated recipes, including details such as ingredients, preparation steps, and cooking times.", "properties": {"recipes": {"description": "A list of generated recipes.", "items": {}, "title": "Recipes", "type": "array"}}, "required": ["recipes"], "title": "Recipes", "type": "object"}
