@@ -27,16 +27,16 @@ class HypothesisWorkflow(BaseModel):
     """The workflow for testing a hypothesis"""
     hypothesis : str = Field(..., description="The hypothesis to test")
     workflow: list[str] = Field(..., description="The workflow for testing a hypothesis")
-    samples: list[Sample]  = Field(..., description="The samples involved in this hypothesis workflow. This is a subset of the `samples` field in the data description model.")
+    required_samples: list[Sample]  = Field(..., description="The samples involved in this specific hypothesis workflow. This is a subset of the `samples` field in the DataDescription model.")
 
 class AnalysisOptions(BaseModel):
     """The possible hypotheses you could test using ONLY the data in the repository"""
-    options: list[HypothesisWorkflow] = Field(..., description="All the possible hypotheses you could test and how to test them in pseudo-code format")
+    options: list[HypothesisWorkflow] = Field(..., description="All the possible hypotheses you could test and how to test them in pseudo-code format. When choosing `required_files` for a hypothesis, you should choose from the `samples` field in the DataDescription model.")
 
-class WorkflowRequirements(BaseModel):
+class WorkflowRequirements(HypothesisWorkflow):
     """The requirements for a workflow"""
     file_name : str = Field(..., description="The name of the workflow file, it should contain no spaces, briefly refer to the hypothesis, and end in .md")
-    data_files : list[DataFile] = Field(..., description="The data files required for the workflow. These are taken directly from the `samples` field in the HypothesisWorkflow model")
+    required_data_files : list[DataFile] = Field(..., description="The data files required for the workflow. These are taken directly from the `samples` field in the HypothesisWorkflow model")
     analysis_steps : list[str] = Field(..., description="The analysis steps for the workflow")
     desired_output : str = Field(..., description="The desired output of the workflow")
 
@@ -47,6 +47,7 @@ def create_data_scanner():
         with open(matrix_path, "r") as file:
             matrix_content = file.read()
         result = await role.aask(matrix_content, DataDescription)
+        raise ValueError("This is a test")
         return(result)
 
     async def evaluate_analysis_options(data_description : DataDescription, role : Role = None) -> AnalysisOptions:
@@ -56,10 +57,20 @@ def create_data_scanner():
             print(hypothesis)
         return(result)
     
+    # async def create_hypotheses_workflows(matrix_path : str, role : Role = None) -> AnalysisOptions:
+    #     """Evaluates the analysis options"""
+    #     with open(matrix_path, "r") as file:
+    #         matrix_content = file.read()
+    #     result = await role.aask(matrix_content, AnalysisOptions)
+    #     for hypothesis in result.options:
+    #         print(hypothesis)
+    #     return(result)
+
+    
     data_scanner = Role(
         name="Data Scanner",
-        profile="An agent that scans for available data",
-        goal="To comprehensively scan for available data",
+        profile="An agent that scans for available data and proposes hypotheses to investigate",
+        goal="To comprehensively scan for available data and propose hypotheses",
         constraints=None,
         model = "gpt-4-0125-preview",
         actions=[scan_matrix, evaluate_analysis_options],
@@ -86,7 +97,7 @@ def create_requirements_writer():
         os.makedirs(out_dir, exist_ok=True)
         for reqs in all_requirements:
             with open(os.path.join(out_dir, reqs.file_name), "w") as file:
-                s = make_data_file_string(reqs.data_files)
+                s = make_data_file_string(reqs.required_data_files)
                 file.write(f"# Input Data Files\n{s}\n")
                 s = '\n'.join([x for x in reqs.analysis_steps])
                 file.write(f"# Analysis Steps\n{s}\n")
