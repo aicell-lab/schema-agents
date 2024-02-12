@@ -88,7 +88,7 @@ class RoleSetting(BaseModel):
     name: str
     profile: str
     goal: str
-    desc: str
+    instructions: str
     constraints: Optional[str] = ""
     icon: Optional[str] = None
 
@@ -107,7 +107,7 @@ class Session(BaseModel):
 class StreamEvent(BaseModel):
     type: str
     query_id: str
-    session: Session
+    session: Optional[Session] = None
     status: str
     content: Optional[str] = None
     name: Optional[str] = None

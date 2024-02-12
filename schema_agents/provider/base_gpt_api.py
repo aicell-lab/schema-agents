@@ -75,7 +75,7 @@ class BaseGPTAPI(BaseChatbot):
             else:
                 rsp = await self.acompletion_function(messages, functions=functions, function_call=function_call, event_bus=event_bus)
         else:
-            rsp = await self.acompletion_text(messages, stream=True, event_bus=event_bus)
+            rsp = await self.acompletion_tool(messages, event_bus=event_bus)
         # logger.debug(message)
         logger.debug(rsp)
         return rsp
