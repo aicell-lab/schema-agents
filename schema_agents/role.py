@@ -444,7 +444,8 @@ class Role:
         output_schema=None,
         thoughts_schema=None,
         max_loop_count=10,
-        return_steps=False,
+        return_metadata=False,
+        prompt=None,
     ):
         output_schema = output_schema or str
         messages, _ = self._normalize_messages(req)
@@ -452,21 +453,22 @@ class Role:
             tools, thoughts_schema=thoughts_schema
         )
 
-        class RespondToUser(BaseModel):
+        class FinalRespondToUser(BaseModel):
             """Call this tool in the end to respond to the user."""
+
             response: output_schema = Field(
                 ..., description="Final response based on all the previous tool calls."
             )
 
-        RespondToUser.update_forward_refs(output_schema=output_schema)
+        FinalRespondToUser.update_forward_refs(output_schema=output_schema)
 
-        out_schemas = tool_inputs_models + [RespondToUser]
+        out_schemas = tool_inputs_models + [FinalRespondToUser]
 
         async def call_tools(tool_calls, tool_ids):
             promises = []
             for fargs in tool_calls:
-                if RespondToUser == fargs.__class__:
-                    result_dict[RespondToUser] = fargs
+                if FinalRespondToUser == fargs.__class__:
+                    result_dict[FinalRespondToUser] = fargs
                     continue
                 idx = tool_inputs_models.index(fargs.__class__)
                 args_ns, kwargs_ns = arg_names[idx]
@@ -521,7 +523,7 @@ class Role:
         fix_doc = lambda doc: doc.replace("\n", ";")[:100]
         tool_entry = lambda s: f" - {s.__name__}: {fix_doc(s.__doc__)}"
         tool_schema_names = "\n".join([tool_entry(s) for s in tool_inputs_models])
-        prompt = f"To respond to the question, you will be placed inside a loop where you can decide whether you want to call `RespondToUser` or the following tools:\n{tool_schema_names}\nFor every step in the loop, you can call one or more tools (or the same tool with different arguments). After execution, tool call results or error will be submitted. If you want to end the loop either because you already know the anwser or too many failed tries, call `RespondToUser` to end the loop. In that case, RespondToUser should be only tool you call. Try to make the best use of the tools to get the answer. Always call a tool, text response is not allowed."
+        tool_prompt = f"To respond to the question, you will be placed inside a loop where you can decide whether you want to call `FinalRespondToUser` or the following tools:\n{tool_schema_names}\nFor every step in the loop, you can call one or more tools (or the same tool with different arguments). After execution, tool call results or error will be submitted. If you want to end the loop either because you already know the anwser or too many failed tries, call `FinalRespondToUser` to end the loop. In that case, FinalRespondToUser should be only tool you call. Try to make the best use of the tools to get the answer. Always call a tool, text response is not allowed."
         loop_count = 0
         while True:
             result_dict = {}
@@ -533,11 +535,19 @@ class Role:
                 use_tool_calls=True,
                 return_metadata=True,
                 prompt=prompt
-                + f"\nCurrent loop count: {loop_count}; Try to use fewer loops if possible, and NEVER exceed the maximum loop count: {max_loop_count}.",
+                or (
+                    tool_prompt
+                    + f"\nCurrent loop count: {loop_count}; Try to use fewer loops if possible, and NEVER exceed the maximum loop count: {max_loop_count}."
+                ),
             )
-            # if isinstance(tool_calls, str):
-            #     result_dict[str] = tool_calls
-            #     break
+            if isinstance(tool_calls, str):
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": f"DO NOT respond with text directly. You MUST call `FinalRespondToUser` or the following tools:\n{tool_schema_names}",
+                    }
+                )
+                continue
 
             tool_ids = metadata["tool_ids"]
             messages.append({"role": "assistant", "tool_calls": metadata["tool_calls"]})
@@ -545,17 +555,17 @@ class Role:
             tool_call_reports = await call_tools(tool_calls, tool_ids)
             messages.extend(tool_call_reports)
 
-            if RespondToUser in result_dict:
+            if FinalRespondToUser in result_dict:
                 break
-            
+
             if loop_count >= max_loop_count + 1:
                 raise RuntimeError(
                     f"Exceeded the maximum loop count: {max_loop_count}."
                 )
 
-        response = result_dict[RespondToUser]
-        if return_steps:
-            return response.response, result_steps
+        response = result_dict[FinalRespondToUser]
+        if return_metadata:
+            return response.response, {"steps": result_steps}
         return response.response
 
     def _format_tool_prompt(
