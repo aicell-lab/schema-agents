@@ -12,7 +12,8 @@ import typing
 from functools import partial
 from inspect import signature
 from typing import Iterable, Optional, Union, Callable
-from pydantic import BaseModel, create_model, Field, ValidationError
+from pydantic import BaseModel, Field, ValidationError
+from pydantic.fields import FieldInfo
 
 from schema_agents.logs import logger
 from schema_agents.utils import parse_special_json, schema_to_function
@@ -25,9 +26,6 @@ from schema_agents.utils.common import current_session
 from contextlib import asynccontextmanager
 from contextvars import copy_context
 
-PREFIX_TEMPLATE = """You are a {profile}, named {name}, your goal is {goal}, and the constraint is {constraints}. """
-
-
 @asynccontextmanager
 async def create_session_context(id=None, role_setting=None):
     pre_session = current_session.get()
@@ -39,7 +37,9 @@ async def create_session_context(id=None, role_setting=None):
     current_session.set(pre_session)
 
 
-
+class ToolExecutionError(BaseModel):
+    error: str
+    traceback: str
 class Role:
     """Role is a person or group who has a specific job or purpose within an organization."""
 
@@ -49,7 +49,7 @@ class Role:
         profile="",
         goal="",
         constraints=None,
-        desc="",
+        instructions="",
         icon="🤖",
         long_term_memory: Optional[LongTermMemory] = None,
         event_bus: EventBus = None,
@@ -62,7 +62,7 @@ class Role:
             profile=profile,
             goal=goal,
             constraints=constraints,
-            desc=desc,
+            instructions=instructions,
             icon=icon,
         )
         self._states = []
@@ -120,9 +120,12 @@ class Role:
 
     def _get_prefix(self):
         """Get prefix."""
-        if self._setting.desc:
-            return self._setting.desc
-        return PREFIX_TEMPLATE.format(**self._setting.dict())
+        if self._setting.instructions:
+            return self._setting.instructions
+        prompt = f"""You are a {self._setting.profile}, named {self._setting.name}, your goal is {self._setting.goal}"""
+        if self._setting.constraints:
+            prompt += f", and the constraints are: {self._setting.constraints}"
+        return prompt
 
     @property
     def user_support_actions(self):
@@ -331,8 +334,10 @@ class Role:
                     raise ValueError(f"Invalid request {r}")
         return messages, input_schema
 
-    def _parse_outputs(self, response, output_types, parallel_call):
-        if response["type"] == "function_call":
+    def _parse_outputs(self, response, output_types=None, parallel_call=None):
+        if response["type"] == "text":
+            return response["content"], {"system_fingerprint": response["system_fingerprint"]}
+        elif response["type"] == "function_call":
             func_call = response["function_call"]
             assert func_call["name"] in [
                 s.__name__ for s in output_types
@@ -381,10 +386,10 @@ class Role:
                 "tool_calls": tool_calls,
             }
 
-    async def acall(self, req, tools, output_schema=None):
+    def _parse_tools(self, tools, thoughts_schema=None):
         tool_inputs_models = []
         arg_names = []
-        messages, _ = self._normalize_messages(req)
+        
         tool_output_models = []
         for tool in tools:
             assert callable(tool), "Tools must be callable functions"
@@ -402,6 +407,8 @@ class Role:
             for i, name in enumerate(names):
                 if sig.parameters[name].default == inspect._empty:
                     defaults.append(Field(..., description=types[i].__doc__))
+                elif isinstance(sig.parameters[name].default, FieldInfo):
+                    defaults.append(sig.parameters[name].default)
                 else:
                     defaults.append(
                         Field(
@@ -409,65 +416,107 @@ class Role:
                         )
                     )
             tool_output_models.append(sig.return_annotation)
+            tool_args = {names[i]: (types[i], defaults[i]) for i in range(len(names))}
+            if thoughts_schema:
+                tool_args["thoughts"] = (thoughts_schema, Field(..., description="Thoughts about this tool call."))
             tool_inputs_models.append(
                 dict_to_pydantic_model(
                     tool.__name__,
-                    {names[i]: (types[i], defaults[i]) for i in range(len(names))},
+                    tool_args,
                     tool.__doc__,
                 )
             )
+        
+        return arg_names, tool_inputs_models
 
-        tool_calls, metadata = await self.aask(
-            messages, tool_inputs_models, use_tool_calls=True, return_metadata=True
-        )
-        tool_ids = metadata["tool_ids"]
-        messages.append({"role": "assistant", "tool_calls": metadata["tool_calls"]})
-        promises = []
-        for fargs in tool_calls:
-            idx = tool_inputs_models.index(fargs.__class__)
-            args_ns, kwargs_ns = arg_names[idx]
-            args = [getattr(fargs, name) for name in args_ns]
-            kwargs = {name: getattr(fargs, name) for name in kwargs_ns}
-            tool = tools[idx]
-            if inspect.iscoroutinefunction(tool):
-                promises.append(tool(*args, **kwargs))
-            else:
-                loop = asyncio.get_running_loop()
+    async def acall(self, req, tools, output_schema=None, thoughts_schema=None):
+        output_schema = output_schema or str
+        messages, _ = self._normalize_messages(req)
+        arg_names, tool_inputs_models = self._parse_tools(tools, thoughts_schema=thoughts_schema)
+        if output_schema:
+            out_schemas = tool_inputs_models + [output_schema]
+        else:
+            out_schemas = tool_inputs_models
 
-                def wrap_func():
-                    return tool(*args, **kwargs)
+        result_steps = []
+        while True:
+            result_dict = {}
+            result_steps.append(result_dict)
+            tool_calls, metadata = await self.aask(
+                messages, out_schemas, use_tool_calls=True, return_metadata=True
+            )
+            if isinstance(tool_calls, str):
+                result_dict[str] = tool_calls
+                break
+            tool_ids = metadata["tool_ids"]
+            messages.append({"role": "assistant", "tool_calls": metadata["tool_calls"]})
+   
+            promises = []
+            for fargs in tool_calls:
+                if output_schema == fargs.__class__ :
+                    result_dict[output_schema] = fargs
+                    continue
+                idx = tool_inputs_models.index(fargs.__class__)
+                args_ns, kwargs_ns = arg_names[idx]
+                args = [getattr(fargs, name) for name in args_ns]
+                kwargs = {name: getattr(fargs, name) for name in kwargs_ns}
+                if thoughts_schema and hasattr(fargs, "thoughts"):
+                    result_dict[thoughts_schema] = fargs.thoughts
 
-                promises.append(loop.run_in_executor(None, wrap_func))
-        results = await asyncio.gather(*promises)
+                tool = tools[idx]
+                async def wrap_func():
+                    try:
+                        if inspect.iscoroutinefunction(tool):
+                            return await tool(*args, **kwargs)
+                        else:
+                            loop = asyncio.get_running_loop()
+                            def sync_func():
+                                return tool(*args, **kwargs)
+                            return await loop.run_in_executor(None, sync_func)
+                    except Exception as exp:
+                        return ToolExecutionError(error=str(exp), traceback=traceback.format_exc())
+    
+                promises.append(wrap_func())
 
-        extra_schemas = []
-        result_dict = {}
-        for call_id, result in enumerate(results):
-            fargs = tool_calls[call_id]
-            idx = tool_inputs_models.index(fargs.__class__)
-            result_dict[tools[idx]] = result
-            if isinstance(result, BaseModel):
-                extra_schemas.append(result.__class__)
-            messages.append(
-                {
-                    "tool_call_id": tool_ids[call_id],
-                    "role": "tool",
-                    "name": tools[idx].__name__,
-                    "content": result.json()
-                    if isinstance(result, BaseModel)
-                    else str(result),
-                }
-            )  # extend conversation with function response
+            results = await asyncio.gather(*promises)
 
-        if not output_schema:
-            return result_dict
+            for call_id, result in enumerate(results):
+                fargs = tool_calls[call_id]
+                idx = tool_inputs_models.index(fargs.__class__)
+                result_dict[tools[idx]] = result
+                messages.append(
+                    {
+                        "tool_call_id": tool_ids[call_id],
+                        "role": "tool",
+                        "name": tools[idx].__name__,
+                        "content": result.json()
+                        if isinstance(result, BaseModel)
+                        else str(result),
+                    }
+                )  # extend conversation with function response
+            if output_schema in result_dict:
+                break
+        return result_steps
 
-        return await self.aask(
-            messages,
-            output_schema=output_schema,
-            use_tool_calls=True,
-            extra_schemas=extra_schemas,
-        )
+    def _format_tool_prompt(self, prefix, input_schema, output_schema, parallel_call=True):
+        schema_names = ",".join([f"`{s.__name__}`" for s in output_schema if s is not str])
+        avoid_schema_names = ",".join([f"`{s.__name__}`" for s in input_schema])
+        allow_text = str in output_schema
+        if allow_text:
+            text_prompt = "respond with text or "
+        else:
+            text_prompt = ""
+        if parallel_call:
+            parallel_prompt = "one or more of these functions in parallel: "
+        else:
+            parallel_prompt = "one of these functions: "
+        if avoid_schema_names:
+            prompt = f"{prefix}You MUST {text_prompt}call {parallel_prompt}{schema_names}. DO NOT call any of the following functions: {avoid_schema_names}."
+        else:
+            prompt = f"{prefix}You MUST {text_prompt}call {parallel_prompt}{schema_names}."
+        if not allow_text:
+            prompt += "DO NOT respond with text directly."
+        return prompt
 
     # @retry(stop=stop_after_attempt(2), wait=wait_fixed(1))
     async def aask(
@@ -517,25 +566,14 @@ class Role:
             assert (
                 use_tool_calls
             ), "Please set `use_tool_calls` to True when passing a list of output schemas."
-            output_types = list(output_schema)
+            output_types = [sch for sch in output_schema if sch is not str]
             parallel_call = True
-            schema_names = ",".join([f"`{s.__name__}`" for s in output_types])
-            avoid_schema_names = ",".join([f"`{s.__name__}`" for s in input_schema])
-            if avoid_schema_names:
-                prompt = prompt or f"{prefix}You MUST call one or more of these functions: {schema_names}. DO NOT return text directly or call any of the following functions: {avoid_schema_names}."
-            else:
-                prompt = prompt or f"{prefix}You MUST call one or more of these functions: {schema_names}. DO NOT return text directly."
-
+            prompt = prompt or self._format_tool_prompt(prefix, input_schema, output_schema, parallel_call = True)
             messages.append({"role": "user", "content": f"{prompt}"})
         elif isinstance(output_schema, typing._UnionGenericAlias):
             # A union type means can only call one function at a time
             output_types = list(output_schema.__args__)
-            schema_names = ",".join([f"`{s.__name__}`" for s in output_types])
-            avoid_schema_names = ",".join([f"`{s.__name__}`" for s in input_schema])
-            if avoid_schema_names:
-                prompt = prompt or f"{prefix}You MUST call one of these functions: {schema_names}. DO NOT return text directly or call any of the following functions: {avoid_schema_names}."
-            else:
-                prompt = prompt or f"{prefix}You MUST call one of these functions: {schema_names}. DO NOT return text directly."
+            prompt = prompt or self._format_tool_prompt(prefix, input_schema, output_types, parallel_call = False)
             messages.append({"role": "user", "content": f"{prompt}"})
         else:
             output_types = [output_schema]
@@ -555,14 +593,14 @@ class Role:
                 function_call=function_call,
                 event_bus=self._event_bus,
             )
-            assert isinstance(
-                response, str
-            ), f"Invalid response type, it must be a string"
-            return response
+            assert response["type"] == "text", f"Invalid response type, it must be a text"
+            content, metadata = self._parse_outputs(response)
+            if return_metadata:
+                return content, metadata
+            return content
+            
         functions = [schema_to_function(s) for s in set(output_types + input_schema)]
-        schema_names = ",".join([f"`{s.__name__}`" for s in output_types])
-        avoid_schema_names = ",".join([f"`{s.__name__}`" for s in input_schema])
-        if len(output_types) == 1:
+        if len(output_types) == 1 and not str in output_schema:
             function_call = {"name": output_types[0].__name__}
         else:
             function_call = "auto"
@@ -574,7 +612,7 @@ class Role:
             event_bus=self._event_bus,
             use_tool_calls=use_tool_calls,
         )
-
+        
         try:
             assert not isinstance(
                 response, str

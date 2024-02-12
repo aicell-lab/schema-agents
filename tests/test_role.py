@@ -58,6 +58,82 @@ class FormDialogInfo(BaseModel):
     ui_schema: Optional[str] = Field(None, description="customized ui schema for rendering the form, json string, no need to escape quotes, in yaml format")
     submit_label: Optional[str] = Field("Submit", description="Submit button label")
 
+@pytest.mark.asyncio
+async def test_tool_call_text():
+    bioimage_analyst = Role(
+                instructions="You are melman, you are helpful and efficent.",
+                actions=[])
+
+    async def get_details(hint: str = Field(..., description="prompt to the user for requesting specific information")) -> str:
+        """Get detailed request from the user."""
+        print(hint)
+        return "Please call me Melman and tell me a joke about penguins. No more questions to me."
+    
+    class AutoGPTThoughtsSchema(BaseModel):
+        """AutoGPT Thoughts"""
+        thoughts: str = Field(..., description="thoughts")
+        reasoning: str = Field(..., description="reasoning")
+        criticism: str = Field(..., description="constructive self-criticism")
+
+    response = await bioimage_analyst.acall("What can you do for me?", [get_details], thoughts_schema=AutoGPTThoughtsSchema)
+    assert response[-1][str]
+    print(response[-1][str])
+    
+    bioimage_analyst.get_event_bus().register_default_events()
+    response = await bioimage_analyst.aask("What can you do for me?")
+    assert isinstance(response, str)
+
+@pytest.mark.asyncio
+async def test_tool_call_retry():
+    run_count = 0
+    async def get_extra_information(extra_info: str=Field(..., description="prompt to the user for requesting specific information")) -> UserInput:
+        """Get Extra Information with hint to the user."""
+        nonlocal run_count
+        if run_count == 0:
+            run_count += 1
+            raise RuntimeError("Filed to get extra information, please try again with more polite and gentle message, and personalize the message with my name Melman.")
+        return await get_user_input(extra_info)
+
+    async def create_user_requirements(query: str, role: Role) -> SoftwareRequirementDocument:
+        """Create user requirements."""
+        response = await role.acall(query, [get_extra_information], SoftwareRequirementDocument)
+        assert response[-1][SoftwareRequirementDocument]
+        return response
+        
+    bioimage_analyst = Role(name="Alice",
+                profile="BioImage Analyst",
+                goal="Efficiently communicate with the user and translate the user's needs into software requirements",
+                constraints=None,
+                actions=[create_user_requirements])
+    bioimage_analyst.get_event_bus().register_default_events()
+    responses = await bioimage_analyst.handle(Message(role="Bot", content="Create a segmentation software"))
+    assert isinstance(responses[0].data, SoftwareRequirementDocument)
+
+
+@pytest.mark.asyncio
+async def test_tool_call():
+    async def create_user_requirements(query: str, role: Role) -> SoftwareRequirementDocument:
+        """Create user requirements."""
+        def create_sdr(sdr: SoftwareRequirementDocument) -> str:
+            """Create Software Requirement Document."""
+            return "SDR"
+
+        async def get_extra_information(extra_info: GetExtraInformation, hint: str) -> UserInput:
+            """Get Extra Information with hint to the user."""
+            return await get_user_input(extra_info)
+
+        response = await role.acall(query, [create_sdr, get_extra_information], SoftwareRequirementDocument)
+        return response
+        
+    bioimage_analyst = Role(name="Alice",
+                profile="BioImage Analyst",
+                goal="Efficiently communicate with the user and translate the user's needs into software requirements",
+                constraints=None,
+                actions=[create_user_requirements])
+    bioimage_analyst.get_event_bus().register_default_events()
+    responses = await bioimage_analyst.handle(Message(role="Bot", content="Create a segmentation software"))
+    assert isinstance(responses[0].data, SoftwareRequirementDocument)
+
 
 @pytest.mark.asyncio
 async def test_schema_user():
@@ -93,29 +169,6 @@ async def test_str_streaming():
     assert isinstance(responses[0].content, str)
 
 
-@pytest.mark.asyncio
-async def test_tool_call():
-    async def create_user_requirements(query: str, role: Role) -> SoftwareRequirementDocument:
-        """Create user requirements."""
-        def create_sdr(sdr: SoftwareRequirementDocument) -> str:
-            """Create Software Requirement Document."""
-            return "SDR"
-
-        async def get_extra_information(extra_info: GetExtraInformation, hint: str) -> UserInput:
-            """Get Extra Information with hint to the user."""
-            return await get_user_input(extra_info)
-
-        response = await role.acall(query, [create_sdr, get_extra_information], SoftwareRequirementDocument)
-        return response
-        
-    bioimage_analyst = Role(name="Alice",
-                profile="BioImage Analyst",
-                goal="Efficiently communicate with the user and translate the user's needs into software requirements",
-                constraints=None,
-                actions=[create_user_requirements])
-    bioimage_analyst.get_event_bus().register_default_events()
-    responses = await bioimage_analyst.handle(Message(role="Bot", content="Create a segmentation software"))
-    assert isinstance(responses[0].data, SoftwareRequirementDocument)
 
 
 @pytest.mark.asyncio
