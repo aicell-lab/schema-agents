@@ -63,7 +63,8 @@ async def test_tool_call_text():
     bioimage_analyst = Role(
                 instructions="You are melman, you are helpful and efficent.",
                 actions=[])
-
+    bioimage_analyst.get_event_bus().register_default_events()
+    
     async def get_details(hint: str = Field(..., description="prompt to the user for requesting specific information")) -> str:
         """Get detailed request from the user."""
         print(hint)
@@ -75,11 +76,13 @@ async def test_tool_call_text():
         reasoning: str = Field(..., description="reasoning")
         criticism: str = Field(..., description="constructive self-criticism")
 
-    response = await bioimage_analyst.acall("What can you do for me?", [get_details], thoughts_schema=AutoGPTThoughtsSchema)
-    assert response[-1][str]
-    print(response[-1][str])
     
-    bioimage_analyst.get_event_bus().register_default_events()
+    
+    response = await bioimage_analyst.acall("What can you do for me?", [get_details], thoughts_schema=AutoGPTThoughtsSchema)
+    assert isinstance(response, str)
+    print(response)
+    
+    
     response = await bioimage_analyst.aask("What can you do for me?")
     assert isinstance(response, str)
 
@@ -97,7 +100,7 @@ async def test_tool_call_retry():
     async def create_user_requirements(query: str, role: Role) -> SoftwareRequirementDocument:
         """Create user requirements."""
         response = await role.acall(query, [get_extra_information], SoftwareRequirementDocument)
-        assert response[-1][SoftwareRequirementDocument]
+        assert isinstance(response, SoftwareRequirementDocument)
         return response
         
     bioimage_analyst = Role(name="Alice",
