@@ -266,10 +266,12 @@ class OpenAIGPTAPI(BaseGPTAPI, RateLimiter):
             functions = [tool['function'] for tool in tools]
             usage = self._calc_usage(messages, _msg, functions=functions)
         else:
-            full_reply_content = ''.join([m.get('content', '') for m in collected_messages if m.get('content')])
-            usage = self._calc_usage(messages, full_reply_content, functions=kwargs.get("functions", None))
+            full_reply_content = {"type": "text", "content": ''.join([m.get('content', '') for m in collected_messages if m.get('content')])}
+            if raw_chunk.system_fingerprint:
+                full_reply_content['system_fingerprint'] = raw_chunk.system_fingerprint
+            usage = self._calc_usage(messages, full_reply_content["content"])
             if event_bus:
-                event_bus.emit("stream", StreamEvent(type="text", query_id=query_id, session=session, content=full_reply_content, status="finished"))
+                event_bus.emit("stream", StreamEvent(type="text", query_id=query_id, session=session, content=full_reply_content["content"], status="finished"))
         self._update_costs(usage)
         if event_bus:
             event_bus.emit("completion", full_reply_content)
