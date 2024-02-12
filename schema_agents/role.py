@@ -565,7 +565,7 @@ class Role:
 
         response = result_dict[FinalRespondToUser]
         if return_metadata:
-            return response.response, result_steps
+            return response.response, {"steps": result_steps}
         return response.response
 
     def _format_tool_prompt(
