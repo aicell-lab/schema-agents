@@ -443,7 +443,7 @@ class Role:
         tools,
         output_schema=None,
         thoughts_schema=None,
-        max_loop_count=5,
+        max_loop_count=10,
         return_steps=False,
     ):
         output_schema = output_schema or str
@@ -547,6 +547,11 @@ class Role:
 
             if RespondToUser in result_dict:
                 break
+            
+            if loop_count >= max_loop_count + 1:
+                raise RuntimeError(
+                    f"Exceeded the maximum loop count: {max_loop_count}."
+                )
 
         response = result_dict[RespondToUser]
         if return_steps:
