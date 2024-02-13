@@ -464,18 +464,21 @@ class Role:
 
         out_schemas = tool_inputs_models + [FinalRespondToUser]
 
-        async def call_tools(tool_calls, tool_ids):
+        async def call_tools(tool_calls, tool_ids, result_list):
             promises = []
             for fargs in tool_calls:
-                if FinalRespondToUser == fargs.__class__:
-                    result_dict[FinalRespondToUser] = fargs
-                    continue
                 idx = tool_inputs_models.index(fargs.__class__)
                 args_ns, kwargs_ns = arg_names[idx]
                 args = [getattr(fargs, name) for name in args_ns]
                 kwargs = {name: getattr(fargs, name) for name in kwargs_ns}
+                func_info = {
+                    "name": tools[idx].__name__,
+                    "args": args,
+                    "kwargs": kwargs,
+                }
+                result_list.append(func_info)
                 if thoughts_schema and hasattr(fargs, "thoughts"):
-                    result_dict[thoughts_schema] = fargs.thoughts
+                    func_info["thoughts"] = fargs.thoughts
 
                 tool = tools[idx]
 
@@ -503,7 +506,7 @@ class Role:
             for call_id, result in enumerate(results):
                 fargs = tool_calls[call_id]
                 idx = tool_inputs_models.index(fargs.__class__)
-                result_dict[tools[idx]] = result
+                result_list[call_id]["result"] = result
                 tool_call_reports.append(
                     {
                         "tool_call_id": tool_ids[call_id],
@@ -525,9 +528,8 @@ class Role:
         tool_schema_names = "\n".join([tool_entry(s) for s in tool_inputs_models])
         tool_prompt = f"To respond to the question, you will be placed inside a loop where you can decide whether you want to call `FinalRespondToUser` or the following tools:\n{tool_schema_names}\nFor every step in the loop, you can call one or more tools (or the same tool with different arguments). After execution, tool call results or error will be submitted. If you want to end the loop either because you already know the anwser or too many failed tries, call `FinalRespondToUser` to end the loop. In that case, FinalRespondToUser should be only tool you call. Try to make the best use of the tools to get the answer. Always call a tool, text response is not allowed."
         loop_count = 0
+        final_response = None
         while True:
-            result_dict = {}
-            result_steps.append(result_dict)
             loop_count += 1
             tool_calls, metadata = await self.aask(
                 messages,
@@ -552,21 +554,31 @@ class Role:
             tool_ids = metadata["tool_ids"]
             messages.append({"role": "assistant", "tool_calls": metadata["tool_calls"]})
 
-            tool_call_reports = await call_tools(tool_calls, tool_ids)
-            messages.extend(tool_call_reports)
+            result_list = []
+            result_steps.append(result_list)
 
-            if FinalRespondToUser in result_dict:
+            for fargs in tool_calls:
+                if FinalRespondToUser == fargs.__class__:
+                    result_list.append(
+                        {"name": "FinalRespondToUser", "response": fargs.response}
+                    )
+                    final_response = fargs.response
+                    break
+
+            if final_response:
                 break
+
+            tool_call_reports = await call_tools(tool_calls, tool_ids, result_list)
+            messages.extend(tool_call_reports)
 
             if loop_count >= max_loop_count + 1:
                 raise RuntimeError(
                     f"Exceeded the maximum loop count: {max_loop_count}."
                 )
 
-        response = result_dict[FinalRespondToUser]
         if return_metadata:
-            return response.response, {"steps": result_steps}
-        return response.response
+            return final_response, {"steps": result_steps}
+        return final_response
 
     def _format_tool_prompt(
         self, prefix, input_schema, output_schema, parallel_call=True
