@@ -14,6 +14,8 @@ from inspect import signature
 from typing import Iterable, Optional, Union, Callable
 from pydantic import BaseModel, Field, ValidationError
 from pydantic.fields import FieldInfo
+from tenacity import retry, stop_after_attempt, wait_fixed, retry_if_exception_type
+import openai
 
 from schema_agents.logs import logger
 from schema_agents.utils import parse_special_json, schema_to_function
@@ -606,7 +608,10 @@ class Role:
             prompt += " DO NOT respond with text directly."
         return prompt
 
-    # @retry(stop=stop_after_attempt(2), wait=wait_fixed(1))
+    @retry(stop=stop_after_attempt(2), 
+       wait=wait_fixed(1), 
+       retry=retry_if_exception_type(openai.APITimeoutError),
+       retry_error_callback=lambda retry_state: f"Failed after {retry_state.attempt_number} attempts")
     async def aask(
         self,
         req,
