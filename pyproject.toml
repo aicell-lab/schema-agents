@@ -3,7 +3,7 @@ requires = ["setuptools", "wheel"]
 
 [project]
 name = "schema-agents"
-version = "0.1.30"
+version = "0.1.31"
 readme = "README.md"
 description = "A schema-based LLM framework for building multi-agent collaborative systems."
 dependencies = [
