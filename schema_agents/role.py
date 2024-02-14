@@ -411,7 +411,7 @@ class Role:
             names = [p.name for p in sig.parameters.values()]
             types = [sig.parameters[name].annotation for name in names]
             for t in types:
-                if isinstance(t, BaseModel):
+                if issubclass(t, BaseModel):
                     t.__name__ = t.__name__ + "_IN" # avoid name conflict
 
             defaults = []
@@ -539,14 +539,16 @@ class Role:
         # tool_entry = lambda s: f" - {s.__name__}: {fix_doc(s.__doc__)}"
         tool_schema_names = "\n".join([s.__name__ for s in tool_inputs_models])
         tool_prompt = (
-            "To address the user's initial query, choose to either conclude with `CompleteUserQuery` or "
-            "employ the following tools for assistance:\n"
+            "When facing the user's initial query, assess whether it requires a straightforward response or additional information. "
+            "If straightforward, provide a direct response using `CompleteUserQuery`. "
+            "Only utilize the following tools if the question demands external data or information that you cannot generate independently:\n"
             f"{tool_schema_names}\n"
-            "Should a tool's output adequately resolve the query, promptly use `CompleteUserQuery` to end the loop. "
-            "Minimize the number of loops and avoid surpassing the maximum limit. In each iteration, integrate the latest "
-            "output with the cumulative results, focusing on providing a truthful and relevant response to the original query."
-            "If the query cannot be resolved with the information at hand, be honest and transparent with the user."
+            "If you opt to use a tool, once you receive adequate data to formulate an answer, conclude the process with `CompleteUserQuery`. "
+            "Your aim is to reduce loops and avoid unnecessary tool interactions. Be judicious in tool use, prioritize direct answers when possible, "
+            "and ensure responses are relevant and truthful. If a query's complexity is beyond the information available, be transparent about what has been attempted "
+            "and consider asking for further clarification. Focus on efficiency and precision in providing a helpful response."
         )
+
         if extra_prompt:
             tool_prompt += f"\n{extra_prompt}"
             prompt += f"\n{extra_prompt}"
