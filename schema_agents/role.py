@@ -410,6 +410,9 @@ class Role:
             arg_names.append((var_positional, kwargs_args))
             names = [p.name for p in sig.parameters.values()]
             types = [sig.parameters[name].annotation for name in names]
+            for t in types:
+                t.__name__ = t.__name__ + "_IN" # avoid name conflict
+
             defaults = []
             for i, name in enumerate(names):
                 if sig.parameters[name].default == inspect._empty:
@@ -429,12 +432,17 @@ class Role:
                     thoughts_schema,
                     Field(..., description="Thoughts about this tool call."),
                 )
+            for t in types:
+                assert tool.__name__ != t.__name__, "Tool name cannot be the same as the input type name."
+                assert tool.__name__ != 'CompleteUserQuery', 'Tool name cannot be `CompleteUserQuery`'
+            model = dict_to_pydantic_model(
+                tool.__name__,
+                tool_args,
+                tool.__doc__,
+            )
+            model.update_forward_refs()
             tool_inputs_models.append(
-                dict_to_pydantic_model(
-                    tool.__name__,
-                    tool_args,
-                    tool.__doc__,
-                )
+                model
             )
 
         return arg_names, tool_inputs_models
