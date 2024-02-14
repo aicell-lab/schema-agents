@@ -448,6 +448,7 @@ class Role:
         max_loop_count=10,
         return_metadata=False,
         prompt=None,
+        extra_prompt=None,
     ):
         output_schema = output_schema or str
         messages, _ = self._normalize_messages(req)
@@ -534,11 +535,12 @@ class Role:
             f"{tool_schema_names}\n"
             "Should a tool's output adequately resolve the query, promptly use `CompleteUserQuery` to end the loop. "
             "Minimize the number of loops and avoid surpassing the maximum limit. In each iteration, integrate the latest "
-            "output with the cumulative results, focusing on providing a truthful and relevant response to the original query. "
-            "If the query cannot be resolved with the information at hand, clearly communicate this, detail the attempts made, "
-            "and, if necessary, request additional clarification. Your communications should be accurate, concise, and avoid "
-            "fabricating information. Your goal is to deliver an accurate, complete, and transparent response efficiently."
+            "output with the cumulative results, focusing on providing a truthful and relevant response to the original query."
+            "If the query cannot be resolved with the information at hand, be honest and transparent with the user."
         )
+        if extra_prompt:
+            tool_prompt += f"\n{extra_prompt}"
+            prompt += f"\n{extra_prompt}"
 
         loop_count = 0
         final_response = None
