@@ -11,7 +11,7 @@ import types
 import typing
 from functools import partial
 from inspect import signature
-from typing import Iterable, Optional, Union, Callable
+from typing import Iterable, Optional, Union, Callable, List
 from pydantic import BaseModel, Field, ValidationError
 from pydantic.fields import FieldInfo
 from tenacity import retry, stop_after_attempt, wait_fixed, retry_if_exception_type
@@ -43,6 +43,25 @@ async def create_session_context(id=None, role_setting=None):
 class ToolExecutionError(BaseModel):
     error: str
     traceback: str
+
+
+class PlanStep(BaseModel):
+    """A step in a plan."""
+
+    goals: str = Field(
+        ..., description="A concise description of the goals of this step."
+    )
+    tools: Optional[List[str]] = Field(
+        None,
+        description="If any, a list tool names to be called. Multiple tools can be called in parallel.",
+    )
+    condition: Optional[str] = Field(
+        None,
+        description="A condition under which this step should be executed, if any.",
+    )
+    max_loops: Optional[int] = Field(
+        None, description="The maximum number of loops or attempts for this step."
+    )
 
 
 class Role:
@@ -344,7 +363,7 @@ class Role:
     def _parse_outputs(self, response, output_types=None, parallel_call=None):
         if response["type"] == "text":
             return response["content"], {
-                "system_fingerprint": response["system_fingerprint"]
+                "system_fingerprint": response.get("system_fingerprint")
             }
         elif response["type"] == "function_call":
             func_call = response["function_call"]
@@ -355,7 +374,7 @@ class Role:
             arguments = parse_special_json(func_call["arguments"])
             function_args = output_types[idx].parse_obj(arguments)
             return function_args, {
-                "system_fingerprint": response["system_fingerprint"],
+                "system_fingerprint": response.get("system_fingerprint"),
                 "function_call": func_call,
             }
         elif response["type"] == "tool_calls":
@@ -389,11 +408,11 @@ class Role:
                 functions = functions[0]
             return functions, {
                 "tool_ids": ids,
-                "system_fingerprint": response["system_fingerprint"],
+                "system_fingerprint": response.get("system_fingerprint"),
                 "tool_calls": tool_calls,
             }
 
-    def _parse_tools(self, tools, thoughts_schema=None):
+    def _parse_tools(self, tools, thoughts_schema=None, localns=None):
         tool_inputs_models = []
         arg_names = []
 
@@ -409,7 +428,14 @@ class Role:
             ]
             arg_names.append((var_positional, kwargs_args))
             names = [p.name for p in sig.parameters.values()]
-            types = [sig.parameters[name].annotation for name in names]
+            # types = [sig.parameters[name].annotation for name in names]
+            type_hints = typing.get_type_hints(tool, localns=localns)
+            types = [type_hints[name] for name in names]
+            for t in types:
+                if inspect.isclass(t) and issubclass(t, BaseModel):
+                    t.__name__ = t.__name__ + "_IN"  # avoid name conflict
+                    t.update_forward_refs()
+
             defaults = []
             for i, name in enumerate(names):
                 if sig.parameters[name].default == inspect._empty:
@@ -426,16 +452,20 @@ class Role:
             tool_args = {names[i]: (types[i], defaults[i]) for i in range(len(names))}
             if thoughts_schema:
                 tool_args["thoughts"] = (
-                    thoughts_schema,
-                    Field(..., description="Thoughts about this tool call."),
+                    Optional[thoughts_schema],
+                    Field(None, description="Thoughts for the tool call."),
                 )
-            tool_inputs_models.append(
-                dict_to_pydantic_model(
-                    tool.__name__,
-                    tool_args,
-                    tool.__doc__,
-                )
+            for t in types:
+                assert (
+                    tool.__name__ != t.__name__
+                ), f"Tool name cannot be the same as the input type name. {tool.__name__} == {t.__name__}"
+            model = dict_to_pydantic_model(
+                tool.__name__,
+                tool_args,
+                tool.__doc__,
             )
+            model.update_forward_refs()
+            tool_inputs_models.append(model)
 
         return arg_names, tool_inputs_models
 
@@ -448,23 +478,77 @@ class Role:
         max_loop_count=10,
         return_metadata=False,
         prompt=None,
+        extra_prompt=None,
     ):
         output_schema = output_schema or str
         messages, _ = self._normalize_messages(req)
-        arg_names, tool_inputs_models = self._parse_tools(
-            tools, thoughts_schema=thoughts_schema
-        )
+        _max_loop = 5
 
-        class FinalRespondToUser(BaseModel):
-            """Call this tool in the end to respond to the user."""
 
+        async def CompleteUserQuery(
             response: output_schema = Field(
                 ..., description="Final response based on all the previous tool calls."
-            )
+            ),
+            knowledge_update: Optional[str] = Field(
+                None,
+                title="Knowledge Update",
+                description="Optional internal notes on insights or observations made during task execution, intended for storing in the agent's memory to inform and improve future interactions.",
+            ),
+        ):
+            """Call this tool in the end to respond to the user."""
+            return "Done"
 
-        FinalRespondToUser.update_forward_refs(output_schema=output_schema)
+        async def StartNewPlan(
+            steps: List[PlanStep] = Field(
+                ...,
+                title="Plan Steps",
+                description="A list of steps that make up the plan.",
+            ),
+            rationale: Optional[str] = Field(
+                None,
+                title="Rationale for Plan",
+                description="An optional field for providing a rationale or explanation for the plan.",
+            ),
+        ):
+            """
+            This tool the agent to sketch a structured plan with ordered steps, each with actions and optional condition for execution.
+            """
+            nonlocal _max_loop, current_out_schemas
+            for step in steps:
+                step.max_loops = step.max_loops or 1
+                _max_loop += step.max_loops
+            _max_loop += 1  # to account for the final response
+            # reset the current_out_schemas to the tool output schemas
+            current_out_schemas = all_out_schemas
+            return "Done"
 
-        out_schemas = tool_inputs_models + [FinalRespondToUser]
+        internal_tools = [CompleteUserQuery, StartNewPlan]
+        tools = internal_tools + tools
+
+        arg_names, tool_inputs_models = self._parse_tools(
+            tools,
+            thoughts_schema=thoughts_schema,
+            localns=locals(),  # to get FinalResponse
+        )
+
+        CompleteUserQuery_model = tool_inputs_models[tools.index(CompleteUserQuery)]
+        all_out_schemas = tool_inputs_models
+
+        async def call_tool(tool, args, kwargs):
+            try:
+                if inspect.iscoroutinefunction(tool):
+                    return await tool(*args, **kwargs)
+                else:
+                    loop = asyncio.get_running_loop()
+
+                    def sync_func():
+                        return tool(*args, **kwargs)
+
+                    return await loop.run_in_executor(None, sync_func)
+            except Exception as exp:
+                return ToolExecutionError(
+                    error=str(exp), traceback=traceback.format_exc()
+                )
 
         async def call_tools(tool_calls, tool_ids, result_list):
             promises = []
@@ -483,24 +567,7 @@ class Role:
                     func_info["thoughts"] = fargs.thoughts
 
                 tool = tools[idx]
-
-                async def wrap_func():
-                    try:
-                        if inspect.iscoroutinefunction(tool):
-                            return await tool(*args, **kwargs)
-                        else:
-                            loop = asyncio.get_running_loop()
-
-                            def sync_func():
-                                return tool(*args, **kwargs)
-
-                            return await loop.run_in_executor(None, sync_func)
-                    except Exception as exp:
-                        return ToolExecutionError(
-                            error=str(exp), traceback=traceback.format_exc()
-                        )
-
-                promises.append(wrap_func())
+                promises.append(call_tool(tool, args, kwargs))
 
             results = await asyncio.gather(*promises)
 
@@ -518,37 +585,60 @@ class Role:
                             result.json()
                             if isinstance(result, BaseModel)
                             else str(result)
-                        ),
+                        )
+                        or "None",
                     }
                 )  # extend conversation with function response
             return tool_call_reports
 
         result_steps = []
-        # Extract class names in out_schemas
-        fix_doc = lambda doc: doc.replace("\n", ";")[:100]
-        tool_entry = lambda s: f" - {s.__name__}: {fix_doc(s.__doc__)}"
-        tool_schema_names = "\n".join([tool_entry(s) for s in tool_inputs_models])
-        tool_prompt = f"To respond to the question, you will be placed inside a loop where you can decide whether you want to call `FinalRespondToUser` or the following tools:\n{tool_schema_names}\nFor every step in the loop, you can call one or more tools (or the same tool with different arguments). After execution, tool call results or error will be submitted. If you want to end the loop either because you already know the anwser or too many failed tries, call `FinalRespondToUser` to end the loop. In that case, FinalRespondToUser should be only tool you call. Try to make the best use of the tools to get the answer. Always call a tool, text response is not allowed."
+        # Extract class names in current_out_schemas
+        # fix_doc = lambda doc: doc.replace("\n", ";")[:100]
+        # tool_entry = lambda s: f" - {s.__name__}: {fix_doc(s.__doc__)}"
+        internal_tool_names = [s.__name__ for s in internal_tools]
+        tool_schema_names = "\n".join([f" - {s.__name__}" for s in tool_inputs_models if s not in internal_tool_names])
+        tool_prompt = (
+            "Respond to the user's query by calling the `CompleteUserQuery` tool, listed tools, or `StartNewPlan`:\n"
+            f"{tool_schema_names}\n"
+            "Call `CompleteUserQuery` for straightforward queries. For complex ones, draft and log a plan with `StartNewPlan`, adjusting as needed. "
+            "Compile insights from all interactions into a final summary via `CompleteUserQuery`, avoiding intermediate summaries. "
+            "Minimize loops, stay within limits, and reassess after each action to align with the query. Be clear, concise, and transparent. "
+            "If unresolved, state what was tried and consider asking for more details. "
+            "IMPORTANT: Only conclude with a `CompleteUserQuery` call; avoid direct responses until the final summary."
+        )
+
+        if extra_prompt:
+            tool_prompt += f"\n{extra_prompt}"
+            prompt += f"\n{extra_prompt}"
+
         loop_count = 0
         final_response = None
+        current_out_schemas = all_out_schemas
         while True:
             loop_count += 1
+            loop_count_prompt = (
+                f"\nLoop count: {loop_count}/{_max_loop}. Exceeding the max loop count will terminate the process. "
+                "If needed, call `StartNewPlan` to update the maximum loop count as you near the maximum."
+            )
             tool_calls, metadata = await self.aask(
                 messages,
-                out_schemas,
+                current_out_schemas,
                 use_tool_calls=True,
                 return_metadata=True,
-                prompt=prompt
-                or (
-                    tool_prompt
-                    + f"\nCurrent loop count: {loop_count}; Try to use fewer loops if possible, and NEVER exceed the maximum loop count: {max_loop_count}."
-                ),
+                prompt=prompt or (tool_prompt + loop_count_prompt),
             )
             if isinstance(tool_calls, str):
+                if len(result_steps) > 0:
+                    result_steps.append([
+                        {"type": "text", "content": tool_calls}
+                    ])
+                if output_schema == str:
+                    final_response = tool_calls
+                    break
                 messages.append(
                     {
                         "role": "user",
-                        "content": f"DO NOT respond with text directly. You MUST call `FinalRespondToUser` or the following tools:\n{tool_schema_names}",
+                        "content": f"VERY IMPORTANT: DO NOT respond with text directly; ALWAYS call tools!",
                     }
                 )
                 continue
@@ -560,10 +650,17 @@ class Role:
             result_steps.append(result_list)
 
             for fargs in tool_calls:
-                if FinalRespondToUser == fargs.__class__:
-                    result_list.append(
-                        {"name": "FinalRespondToUser", "response": fargs.response}
-                    )
+                idx = tool_inputs_models.index(fargs.__class__)
+                if tools[idx] == CompleteUserQuery:
+                    args_ns, kwargs_ns = arg_names[idx]
+                    args = [getattr(fargs, name) for name in args_ns]
+                    kwargs = {name: getattr(fargs, name) for name in kwargs_ns}
+                    func_info = {
+                        "name": tools[idx].__name__,
+                        "args": args,
+                        "kwargs": kwargs,
+                    }
+                    result_list.append(func_info)
                     final_response = fargs.response
                     break
 
@@ -571,11 +668,22 @@ class Role:
                 break
 
             tool_call_reports = await call_tools(tool_calls, tool_ids, result_list)
-            messages.extend(tool_call_reports)
+            if tool_call_reports:
+                messages.extend(tool_call_reports)
 
-            if loop_count >= max_loop_count + 1:
+            _max = min(_max_loop + 1, max_loop_count)
+            if loop_count >= _max_loop:
+                messages.append(
+                    {
+                        "role": "assistant",
+                        "content": f"Force terminating the process due to exceeding the maximum loop count: {_max_loop}.",
+                    }
+                )
+                # Force quitting by setting the only tool to CompleteUserQuery
+                current_out_schemas = [ CompleteUserQuery_model ]
+            elif loop_count >= _max:
                 raise RuntimeError(
-                    f"Exceeded the maximum loop count: {max_loop_count}."
+                    f"Exceeded the maximum loop count: {_max}."
                 )
 
         if return_metadata:
@@ -608,10 +716,12 @@ class Role:
             prompt += " DO NOT respond with text directly."
         return prompt
 
-    @retry(stop=stop_after_attempt(2), 
-       wait=wait_fixed(1), 
-       retry=retry_if_exception_type(openai.APITimeoutError),
-       retry_error_callback=lambda retry_state: f"Failed after {retry_state.attempt_number} attempts")
+    @retry(
+        stop=stop_after_attempt(2),
+        wait=wait_fixed(1),
+        retry=retry_if_exception_type(openai.APITimeoutError),
+        retry_error_callback=lambda retry_state: f"Failed after {retry_state.attempt_number} attempts",
+    )
     async def aask(
         self,
         req,
