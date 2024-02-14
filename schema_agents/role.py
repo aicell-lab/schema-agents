@@ -47,20 +47,20 @@ class ToolExecutionError(BaseModel):
 
 class PlanStep(BaseModel):
     """A step in a plan."""
-    action: str = Field(
-        ...,
-        title="Action Description",
-        description="A clear description of the action to be taken in this step."
+
+    goals: str = Field(
+        ..., description="A concise description of the goals of this step."
+    )
+    tools: Optional[List[str]] = Field(
+        None,
+        description="If any, a list tool names to be called. Multiple tools can be called in parallel.",
     )
     condition: Optional[str] = Field(
         None,
-        title="Conditional",
-        description="A condition under which this step should be executed, if any."
+        description="A condition under which this step should be executed, if any.",
     )
-    order: int = Field(
-        ...,
-        title="Step Order",
-        description="The numerical order this step should be executed in, starting with 1."
+    max_loops: Optional[int] = Field(
+        None, description="The maximum number of loops or attempts for this step."
     )
 
 
@@ -433,7 +433,7 @@ class Role:
             types = [type_hints[name] for name in names]
             for t in types:
                 if inspect.isclass(t) and issubclass(t, BaseModel):
-                    t.__name__ = t.__name__ + "_IN" # avoid name conflict
+                    t.__name__ = t.__name__ + "_IN"  # avoid name conflict
                     t.update_forward_refs()
 
             defaults = []
@@ -456,16 +456,16 @@ class Role:
                     Field(None, description="Thoughts for the tool call."),
                 )
             for t in types:
-                assert tool.__name__ != t.__name__, f"Tool name cannot be the same as the input type name. {tool.__name__} == {t.__name__}"
+                assert (
+                    tool.__name__ != t.__name__
+                ), f"Tool name cannot be the same as the input type name. {tool.__name__} == {t.__name__}"
             model = dict_to_pydantic_model(
                 tool.__name__,
                 tool_args,
                 tool.__doc__,
             )
             model.update_forward_refs()
-            tool_inputs_models.append(
-                model
-            )
+            tool_inputs_models.append(model)
 
         return arg_names, tool_inputs_models
 
@@ -482,40 +482,73 @@ class Role:
     ):
         output_schema = output_schema or str
         messages, _ = self._normalize_messages(req)
-        
-        async def complete_user_query(response: output_schema = Field(
-            ..., description="Final response based on all the previous tool calls."
-        )):
+        _max_loop = 5
+
+
+        async def CompleteUserQuery(
+            response: output_schema = Field(
+                ..., description="Final response based on all the previous tool calls."
+            ),
+            knowledge_update: Optional[str] = Field(
+                None,
+                title="Knowledge Update",
+                description="Optional internal notes on insights or observations made during task execution, intended for storing in the agent's memory to inform and improve future interactions.",
+            ),
+        ):
             """Call this tool in the end to respond to the user."""
             return "Done"
-        
-        async def planning_tool(
+
+        async def StartNewPlan(
             steps: List[PlanStep] = Field(
                 ...,
                 title="Plan Steps",
-                description="A list of steps that make up the plan."
+                description="A list of steps that make up the plan.",
             ),
             rationale: Optional[str] = Field(
                 None,
                 title="Rationale for Plan",
-                description="An optional field for providing a rationale or explanation for the plan."
-            )):
+                description="An optional field for providing a rationale or explanation for the plan.",
+            ),
+        ):
             """
-            This tool the agent to sketch a structured plan with ordered steps, 
-            each with a specific action and optional condition for execution. It is intended 
-            to be used when complex tasks require a sequenced approach or when adjustments to 
-            an ongoing plan are necessary. This tool helps the agent to maintain a clear strategy 
-            and adapt as new information is gathered or the situation changes.
+            This tool the agent to sketch a structured plan with ordered steps, each with actions and optional condition for execution.
             """
-            return "Plan confirmed"
-        
-        tools = [complete_user_query, planning_tool] + tools
-        
+            nonlocal _max_loop, current_out_schemas
+            for step in steps:
+                step.max_loops = step.max_loops or 1
+                _max_loop += step.max_loops
+            _max_loop += 1  # to account for the final response
+            # reset the current_out_schemas to the tool output schemas
+            current_out_schemas = all_out_schemas
+            return "Done"
+
+        internal_tools = [CompleteUserQuery, StartNewPlan]
+        tools = internal_tools + tools
+
         arg_names, tool_inputs_models = self._parse_tools(
-            tools, thoughts_schema=thoughts_schema, localns=locals() # to get FinalResponse
+            tools,
+            thoughts_schema=thoughts_schema,
+            localns=locals(),  # to get FinalResponse
         )
 
-        out_schemas = tool_inputs_models
+        CompleteUserQuery_model = tool_inputs_models[tools.index(CompleteUserQuery)]
+        all_out_schemas = tool_inputs_models
+
+        async def call_tool(tool, args, kwargs):
+            try:
+                if inspect.iscoroutinefunction(tool):
+                    return await tool(*args, **kwargs)
+                else:
+                    loop = asyncio.get_running_loop()
+
+                    def sync_func():
+                        return tool(*args, **kwargs)
+
+                    return await loop.run_in_executor(None, sync_func)
+            except Exception as exp:
+                return ToolExecutionError(
+                    error=str(exp), traceback=traceback.format_exc()
+                )
 
         async def call_tools(tool_calls, tool_ids, result_list):
             promises = []
@@ -534,24 +567,7 @@ class Role:
                     func_info["thoughts"] = fargs.thoughts
 
                 tool = tools[idx]
-
-                async def wrap_func():
-                    try:
-                        if inspect.iscoroutinefunction(tool):
-                            return await tool(*args, **kwargs)
-                        else:
-                            loop = asyncio.get_running_loop()
-
-                            def sync_func():
-                                return tool(*args, **kwargs)
-
-                            return await loop.run_in_executor(None, sync_func)
-                    except Exception as exp:
-                        return ToolExecutionError(
-                            error=str(exp), traceback=traceback.format_exc()
-                        )
-
-                promises.append(wrap_func())
+                promises.append(call_tool(tool, args, kwargs))
 
             results = await asyncio.gather(*promises)
 
@@ -559,7 +575,7 @@ class Role:
             for call_id, result in enumerate(results):
                 fargs = tool_calls[call_id]
                 idx = tool_inputs_models.index(fargs.__class__)
-                result_list[call_id]["result"] = result 
+                result_list[call_id]["result"] = result
                 tool_call_reports.append(
                     {
                         "tool_call_id": tool_ids[call_id],
@@ -569,28 +585,26 @@ class Role:
                             result.json()
                             if isinstance(result, BaseModel)
                             else str(result)
-                        ) or "None",
+                        )
+                        or "None",
                     }
                 )  # extend conversation with function response
             return tool_call_reports
 
         result_steps = []
-        # Extract class names in out_schemas
+        # Extract class names in current_out_schemas
         # fix_doc = lambda doc: doc.replace("\n", ";")[:100]
         # tool_entry = lambda s: f" - {s.__name__}: {fix_doc(s.__doc__)}"
-        tool_schema_names = "\n".join([s.__name__ for s in tool_inputs_models])
+        internal_tool_names = [s.__name__ for s in internal_tools]
+        tool_schema_names = "\n".join([f" - {s.__name__}" for s in tool_inputs_models if s not in internal_tool_names])
         tool_prompt = (
-            "In addressing the user's query, you have the option to finalize the interaction with `complete_user_query`, "
-            "use the tools listed below, or engage the `planning_tool` to develop or adjust a plan for more complex tasks:\n"
+            "Respond to the user's query by calling the `CompleteUserQuery` tool, listed tools, or `StartNewPlan`:\n"
             f"{tool_schema_names}\n"
-            "Directly use `complete_user_query` for straightforward queries. For complex tasks, create an initial plan with "
-            "`planning_tool`, which can be revised later as needed. If a tool yields information that resolves the query, "
-            "exit the loop by calling `complete_user_query`. Maintain a minimal loop count and do not exceed the maximum. "
-            "Evaluate each tool's output and your ongoing plan after every loop to ensure your next steps are informed and "
-            "aligned with the original query. Your responses should be precise, concise, and transparent. If the query "
-            "remains unresolved or becomes clearer through the process, communicate this openly and, if necessary, "
-            "request further details from the user. Aim for an accurate, complete, and clear response with the optimal "
-            "number of iterations, adapting your plan as the situation evolves."
+            "Call `CompleteUserQuery` for straightforward queries. For complex ones, draft and log a plan with `StartNewPlan`, adjusting as needed. "
+            "Compile insights from all interactions into a final summary via `CompleteUserQuery`, avoiding intermediate summaries. "
+            "Minimize loops, stay within limits, and reassess after each action to align with the query. Be clear, concise, and transparent. "
+            "If unresolved, state what was tried and consider asking for more details. "
+            "IMPORTANT: Only conclude with a `CompleteUserQuery` call; avoid direct responses until the final summary."
         )
 
         if extra_prompt:
@@ -599,24 +613,32 @@ class Role:
 
         loop_count = 0
         final_response = None
+        current_out_schemas = all_out_schemas
         while True:
             loop_count += 1
+            loop_count_prompt = (
+                f"\nLoop count: {loop_count}/{_max_loop}. Exceeding the max loop count will terminate the process. "
+                "If needed, call `StartNewPlan` to update the maximum loop count as you near the maximum."
+            )
             tool_calls, metadata = await self.aask(
                 messages,
-                out_schemas,
+                current_out_schemas,
                 use_tool_calls=True,
                 return_metadata=True,
-                prompt=prompt
-                or (
-                    tool_prompt
-                    + f"\nCurrent loop count: {loop_count}; Try to use fewer loops if possible, and NEVER exceed the maximum loop count: {max_loop_count}."
-                ),
+                prompt=prompt or (tool_prompt + loop_count_prompt),
             )
             if isinstance(tool_calls, str):
+                if len(result_steps) > 0:
+                    result_steps.append([
+                        {"type": "text", "content": tool_calls}
+                    ])
+                if output_schema == str:
+                    final_response = tool_calls
+                    break
                 messages.append(
                     {
                         "role": "user",
-                        "content": f"DO NOT respond with text directly. You MUST call `complete_user_query` or the following tools:\n{tool_schema_names}",
+                        "content": f"VERY IMPORTANT: DO NOT respond with text directly; ALWAYS call tools!",
                     }
                 )
                 continue
@@ -629,23 +651,39 @@ class Role:
 
             for fargs in tool_calls:
                 idx = tool_inputs_models.index(fargs.__class__)
-                if tools[idx] == complete_user_query:
-                    result_list.append(
-                        {"name": "FinalResponse", "response": fargs.response}
-                    )
+                if tools[idx] == CompleteUserQuery:
+                    args_ns, kwargs_ns = arg_names[idx]
+                    args = [getattr(fargs, name) for name in args_ns]
+                    kwargs = {name: getattr(fargs, name) for name in kwargs_ns}
+                    func_info = {
+                        "name": tools[idx].__name__,
+                        "args": args,
+                        "kwargs": kwargs,
+                    }
+                    result_list.append(func_info)
                     final_response = fargs.response
                     break
 
             if final_response:
                 break
-            
+
             tool_call_reports = await call_tools(tool_calls, tool_ids, result_list)
             if tool_call_reports:
                 messages.extend(tool_call_reports)
 
-            if loop_count >= max_loop_count + 1:
+            _max = min(_max_loop + 1, max_loop_count)
+            if loop_count >= _max_loop:
+                messages.append(
+                    {
+                        "role": "assistant",
+                        "content": f"Force terminating the process due to exceeding the maximum loop count: {_max_loop}.",
+                    }
+                )
+                # Force quitting by setting the only tool to CompleteUserQuery
+                current_out_schemas = [ CompleteUserQuery_model ]
+            elif loop_count >= _max:
                 raise RuntimeError(
-                    f"Exceeded the maximum loop count: {max_loop_count}."
+                    f"Exceeded the maximum loop count: {_max}."
                 )
 
         if return_metadata:
@@ -678,10 +716,12 @@ class Role:
             prompt += " DO NOT respond with text directly."
         return prompt
 
-    @retry(stop=stop_after_attempt(2), 
-       wait=wait_fixed(1), 
-       retry=retry_if_exception_type(openai.APITimeoutError),
-       retry_error_callback=lambda retry_state: f"Failed after {retry_state.attempt_number} attempts")
+    @retry(
+        stop=stop_after_attempt(2),
+        wait=wait_fixed(1),
+        retry=retry_if_exception_type(openai.APITimeoutError),
+        retry_error_callback=lambda retry_state: f"Failed after {retry_state.attempt_number} attempts",
+    )
     async def aask(
         self,
         req,
