@@ -11,7 +11,7 @@ import types
 import typing
 from functools import partial
 from inspect import signature
-from typing import Iterable, Optional, Union, Callable
+from typing import Iterable, Optional, Union, Callable, List
 from pydantic import BaseModel, Field, ValidationError
 from pydantic.fields import FieldInfo
 from tenacity import retry, stop_after_attempt, wait_fixed, retry_if_exception_type
@@ -43,6 +43,25 @@ async def create_session_context(id=None, role_setting=None):
 class ToolExecutionError(BaseModel):
     error: str
     traceback: str
+
+
+class PlanStep(BaseModel):
+    """A step in a plan."""
+    action: str = Field(
+        ...,
+        title="Action Description",
+        description="A clear description of the action to be taken in this step."
+    )
+    condition: Optional[str] = Field(
+        None,
+        title="Conditional",
+        description="A condition under which this step should be executed, if any."
+    )
+    order: int = Field(
+        ...,
+        title="Step Order",
+        description="The numerical order this step should be executed in, starting with 1."
+    )
 
 
 class Role:
@@ -393,7 +412,7 @@ class Role:
                 "tool_calls": tool_calls,
             }
 
-    def _parse_tools(self, tools, thoughts_schema=None):
+    def _parse_tools(self, tools, thoughts_schema=None, localns=None):
         tool_inputs_models = []
         arg_names = []
 
@@ -409,10 +428,13 @@ class Role:
             ]
             arg_names.append((var_positional, kwargs_args))
             names = [p.name for p in sig.parameters.values()]
-            types = [sig.parameters[name].annotation for name in names]
+            # types = [sig.parameters[name].annotation for name in names]
+            type_hints = typing.get_type_hints(tool, localns=localns)
+            types = [type_hints[name] for name in names]
             for t in types:
-                if issubclass(t, BaseModel):
+                if inspect.isclass(t) and issubclass(t, BaseModel):
                     t.__name__ = t.__name__ + "_IN" # avoid name conflict
+                    t.update_forward_refs()
 
             defaults = []
             for i, name in enumerate(names):
@@ -430,12 +452,11 @@ class Role:
             tool_args = {names[i]: (types[i], defaults[i]) for i in range(len(names))}
             if thoughts_schema:
                 tool_args["thoughts"] = (
-                    thoughts_schema,
-                    Field(..., description="Thoughts about this tool call."),
+                    Optional[thoughts_schema],
+                    Field(None, description="Thoughts for the tool call."),
                 )
             for t in types:
                 assert tool.__name__ != t.__name__, f"Tool name cannot be the same as the input type name. {tool.__name__} == {t.__name__}"
-                assert tool.__name__ != 'CompleteUserQuery', 'Tool name cannot be `CompleteUserQuery`'
             model = dict_to_pydantic_model(
                 tool.__name__,
                 tool_args,
@@ -461,20 +482,40 @@ class Role:
     ):
         output_schema = output_schema or str
         messages, _ = self._normalize_messages(req)
+        
+        async def complete_user_query(response: output_schema = Field(
+            ..., description="Final response based on all the previous tool calls."
+        )):
+            """Call this tool in the end to respond to the user."""
+            return "Done"
+        
+        async def planning_tool(
+            steps: List[PlanStep] = Field(
+                ...,
+                title="Plan Steps",
+                description="A list of steps that make up the plan."
+            ),
+            rationale: Optional[str] = Field(
+                None,
+                title="Rationale for Plan",
+                description="An optional field for providing a rationale or explanation for the plan."
+            )):
+            """
+            This tool the agent to sketch a structured plan with ordered steps, 
+            each with a specific action and optional condition for execution. It is intended 
+            to be used when complex tasks require a sequenced approach or when adjustments to 
+            an ongoing plan are necessary. This tool helps the agent to maintain a clear strategy 
+            and adapt as new information is gathered or the situation changes.
+            """
+            return "Plan confirmed"
+        
+        tools = [complete_user_query, planning_tool] + tools
+        
         arg_names, tool_inputs_models = self._parse_tools(
-            tools, thoughts_schema=thoughts_schema
+            tools, thoughts_schema=thoughts_schema, localns=locals() # to get FinalResponse
         )
 
-        class CompleteUserQuery(BaseModel):
-            """Call this tool in the end to respond to the user."""
-
-            response: output_schema = Field(
-                ..., description="Final response based on all the previous tool calls."
-            )
-
-        CompleteUserQuery.update_forward_refs(output_schema=output_schema)
-
-        out_schemas = tool_inputs_models + [CompleteUserQuery]
+        out_schemas = tool_inputs_models
 
         async def call_tools(tool_calls, tool_ids, result_list):
             promises = []
@@ -518,7 +559,7 @@ class Role:
             for call_id, result in enumerate(results):
                 fargs = tool_calls[call_id]
                 idx = tool_inputs_models.index(fargs.__class__)
-                result_list[call_id]["result"] = result
+                result_list[call_id]["result"] = result 
                 tool_call_reports.append(
                     {
                         "tool_call_id": tool_ids[call_id],
@@ -528,7 +569,7 @@ class Role:
                             result.json()
                             if isinstance(result, BaseModel)
                             else str(result)
-                        ),
+                        ) or "None",
                     }
                 )  # extend conversation with function response
             return tool_call_reports
@@ -539,14 +580,17 @@ class Role:
         # tool_entry = lambda s: f" - {s.__name__}: {fix_doc(s.__doc__)}"
         tool_schema_names = "\n".join([s.__name__ for s in tool_inputs_models])
         tool_prompt = (
-            "When facing the user's initial query, assess whether it requires a straightforward response or additional information. "
-            "If straightforward, provide a direct response using `CompleteUserQuery`. "
-            "Only utilize the following tools if the question demands external data or information that you cannot generate independently:\n"
+            "In addressing the user's query, you have the option to finalize the interaction with `complete_user_query`, "
+            "use the tools listed below, or engage the `planning_tool` to develop or adjust a plan for more complex tasks:\n"
             f"{tool_schema_names}\n"
-            "If you opt to use a tool, once you receive adequate data to formulate an answer, conclude the process with `CompleteUserQuery`. "
-            "Your aim is to reduce loops and avoid unnecessary tool interactions. Be judicious in tool use, prioritize direct answers when possible, "
-            "and ensure responses are relevant and truthful. If a query's complexity is beyond the information available, be transparent about what has been attempted "
-            "and consider asking for further clarification. Focus on efficiency and precision in providing a helpful response."
+            "Directly use `complete_user_query` for straightforward queries. For complex tasks, create an initial plan with "
+            "`planning_tool`, which can be revised later as needed. If a tool yields information that resolves the query, "
+            "exit the loop by calling `complete_user_query`. Maintain a minimal loop count and do not exceed the maximum. "
+            "Evaluate each tool's output and your ongoing plan after every loop to ensure your next steps are informed and "
+            "aligned with the original query. Your responses should be precise, concise, and transparent. If the query "
+            "remains unresolved or becomes clearer through the process, communicate this openly and, if necessary, "
+            "request further details from the user. Aim for an accurate, complete, and clear response with the optimal "
+            "number of iterations, adapting your plan as the situation evolves."
         )
 
         if extra_prompt:
@@ -572,7 +616,7 @@ class Role:
                 messages.append(
                     {
                         "role": "user",
-                        "content": f"DO NOT respond with text directly. You MUST call `CompleteUserQuery` or the following tools:\n{tool_schema_names}",
+                        "content": f"DO NOT respond with text directly. You MUST call `complete_user_query` or the following tools:\n{tool_schema_names}",
                     }
                 )
                 continue
@@ -584,18 +628,20 @@ class Role:
             result_steps.append(result_list)
 
             for fargs in tool_calls:
-                if CompleteUserQuery == fargs.__class__:
+                idx = tool_inputs_models.index(fargs.__class__)
+                if tools[idx] == complete_user_query:
                     result_list.append(
-                        {"name": "CompleteUserQuery", "response": fargs.response}
+                        {"name": "FinalResponse", "response": fargs.response}
                     )
                     final_response = fargs.response
                     break
 
             if final_response:
                 break
-
+            
             tool_call_reports = await call_tools(tool_calls, tool_ids, result_list)
-            messages.extend(tool_call_reports)
+            if tool_call_reports:
+                messages.extend(tool_call_reports)
 
             if loop_count >= max_loop_count + 1:
                 raise RuntimeError(
