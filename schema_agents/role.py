@@ -344,7 +344,7 @@ class Role:
     def _parse_outputs(self, response, output_types=None, parallel_call=None):
         if response["type"] == "text":
             return response["content"], {
-                "system_fingerprint": response["system_fingerprint"]
+                "system_fingerprint": response.get("system_fingerprint")
             }
         elif response["type"] == "function_call":
             func_call = response["function_call"]
@@ -355,7 +355,7 @@ class Role:
             arguments = parse_special_json(func_call["arguments"])
             function_args = output_types[idx].parse_obj(arguments)
             return function_args, {
-                "system_fingerprint": response["system_fingerprint"],
+                "system_fingerprint": response.get("system_fingerprint"),
                 "function_call": func_call,
             }
         elif response["type"] == "tool_calls":
@@ -389,7 +389,7 @@ class Role:
                 functions = functions[0]
             return functions, {
                 "tool_ids": ids,
-                "system_fingerprint": response["system_fingerprint"],
+                "system_fingerprint": response.get("system_fingerprint"),
                 "tool_calls": tool_calls,
             }
 
@@ -455,16 +455,16 @@ class Role:
             tools, thoughts_schema=thoughts_schema
         )
 
-        class FinalRespondToUser(BaseModel):
+        class CompleteUserQuery(BaseModel):
             """Call this tool in the end to respond to the user."""
 
             response: output_schema = Field(
                 ..., description="Final response based on all the previous tool calls."
             )
 
-        FinalRespondToUser.update_forward_refs(output_schema=output_schema)
+        CompleteUserQuery.update_forward_refs(output_schema=output_schema)
 
-        out_schemas = tool_inputs_models + [FinalRespondToUser]
+        out_schemas = tool_inputs_models + [CompleteUserQuery]
 
         async def call_tools(tool_calls, tool_ids, result_list):
             promises = []
@@ -525,10 +525,21 @@ class Role:
 
         result_steps = []
         # Extract class names in out_schemas
-        fix_doc = lambda doc: doc.replace("\n", ";")[:100]
-        tool_entry = lambda s: f" - {s.__name__}: {fix_doc(s.__doc__)}"
-        tool_schema_names = "\n".join([tool_entry(s) for s in tool_inputs_models])
-        tool_prompt = f"To respond to the question, you will be placed inside a loop where you can decide whether you want to call `FinalRespondToUser` or the following tools:\n{tool_schema_names}\nFor every step in the loop, you can call one or more tools (or the same tool with different arguments). After execution, tool call results or error will be submitted. If you want to end the loop either because you already know the anwser or too many failed tries, call `FinalRespondToUser` to end the loop. In that case, FinalRespondToUser should be only tool you call. Try to make the best use of the tools to get the answer. Always call a tool, text response is not allowed."
+        # fix_doc = lambda doc: doc.replace("\n", ";")[:100]
+        # tool_entry = lambda s: f" - {s.__name__}: {fix_doc(s.__doc__)}"
+        tool_schema_names = "\n".join([s.__name__ for s in tool_inputs_models])
+        tool_prompt = (
+            "To address the user's initial query, choose to either conclude with `CompleteUserQuery` or "
+            "employ the following tools for assistance:\n"
+            f"{tool_schema_names}\n"
+            "Should a tool's output adequately resolve the query, promptly use `CompleteUserQuery` to end the loop. "
+            "Minimize the number of loops and avoid surpassing the maximum limit. In each iteration, integrate the latest "
+            "output with the cumulative results, focusing on providing a truthful and relevant response to the original query. "
+            "If the query cannot be resolved with the information at hand, clearly communicate this, detail the attempts made, "
+            "and, if necessary, request additional clarification. Your communications should be accurate, concise, and avoid "
+            "fabricating information. Your goal is to deliver an accurate, complete, and transparent response efficiently."
+        )
+
         loop_count = 0
         final_response = None
         while True:
@@ -548,7 +559,7 @@ class Role:
                 messages.append(
                     {
                         "role": "user",
-                        "content": f"DO NOT respond with text directly. You MUST call `FinalRespondToUser` or the following tools:\n{tool_schema_names}",
+                        "content": f"DO NOT respond with text directly. You MUST call `CompleteUserQuery` or the following tools:\n{tool_schema_names}",
                     }
                 )
                 continue
@@ -560,9 +571,9 @@ class Role:
             result_steps.append(result_list)
 
             for fargs in tool_calls:
-                if FinalRespondToUser == fargs.__class__:
+                if CompleteUserQuery == fargs.__class__:
                     result_list.append(
-                        {"name": "FinalRespondToUser", "response": fargs.response}
+                        {"name": "CompleteUserQuery", "response": fargs.response}
                     )
                     final_response = fargs.response
                     break
