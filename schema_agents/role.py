@@ -411,7 +411,8 @@ class Role:
             names = [p.name for p in sig.parameters.values()]
             types = [sig.parameters[name].annotation for name in names]
             for t in types:
-                t.__name__ = t.__name__ + "_IN" # avoid name conflict
+                if isinstance(t, BaseModel):
+                    t.__name__ = t.__name__ + "_IN" # avoid name conflict
 
             defaults = []
             for i, name in enumerate(names):
@@ -433,7 +434,7 @@ class Role:
                     Field(..., description="Thoughts about this tool call."),
                 )
             for t in types:
-                assert tool.__name__ != t.__name__, "Tool name cannot be the same as the input type name."
+                assert tool.__name__ != t.__name__, f"Tool name cannot be the same as the input type name. {tool.__name__} == {t.__name__}"
                 assert tool.__name__ != 'CompleteUserQuery', 'Tool name cannot be `CompleteUserQuery`'
             model = dict_to_pydantic_model(
                 tool.__name__,
