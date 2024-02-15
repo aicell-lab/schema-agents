@@ -412,7 +412,7 @@ class Role:
                 "tool_calls": tool_calls,
             }
 
-    def _parse_tools(self, tools, thoughts_schema=None, localns=None):
+    def _parse_tools(self, tools, internal_tools, thoughts_schema=None, localns=None):
         tool_inputs_models = []
         arg_names = []
 
@@ -450,7 +450,8 @@ class Role:
                     )
             tool_output_models.append(sig.return_annotation)
             tool_args = {names[i]: (types[i], defaults[i]) for i in range(len(names))}
-            if thoughts_schema:
+            # skip adding thoughts to internal tools
+            if thoughts_schema and tool not in internal_tools:
                 tool_args["thoughts"] = (
                     Optional[thoughts_schema],
                     Field(None, description="Thoughts for the tool call."),
@@ -528,6 +529,7 @@ class Role:
 
         arg_names, tool_inputs_models = self._parse_tools(
             tools,
+            internal_tools,
             thoughts_schema=thoughts_schema,
             localns=locals(),  # to get FinalResponse
         )
@@ -720,7 +722,7 @@ class Role:
     @retry(
         stop=stop_after_attempt(2),
         wait=wait_fixed(1),
-        retry=retry_if_exception_type(openai.APITimeoutError),
+        retry=retry_if_exception_type((openai.APITimeoutError, ValidationError)),
         retry_error_callback=lambda retry_state: f"Failed after {retry_state.attempt_number} attempts",
     )
     async def aask(
