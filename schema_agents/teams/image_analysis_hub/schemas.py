@@ -45,13 +45,8 @@ class FunctionMemory(BaseModel):
     function_name: str = Field(default="", description="Function name")
     code: str = Field(default="", description="original code of the function")
     lang: str = Field(default="", description="function language")
-    args: List[str] = Field(default=[], description="arguments of the function")
-    
-class ErrorMemory(BaseModel):
-    """Experience of making errors to be saved in the long term memory."""    
-    error: str = Field(default="", description="Error description")
-    cause_by: str = Field(default="", description="Cause of the error")
-    solution: str = Field(default="", description="Solution to fix the error")
+    args: List[str] = Field(default=[], description="arguments of the function, with type annotation")
+    docstring: Optional[str] = Field(default=None, description="docstring of the function")
 
 class ExperienceMemory(BaseModel):
     """Experience to be saved in the long term memory."""    
