@@ -456,9 +456,10 @@ class Role:
                     Field(None, description="Thoughts for the tool call."),
                 )
             for t in types:
-                assert (
-                    tool.__name__ != t.__name__
-                ), f"Tool name cannot be the same as the input type name. {tool.__name__} == {t.__name__}"
+                if inspect.isclass(t) and issubclass(t, BaseModel):
+                    assert (
+                        tool.__name__ != t.__name__
+                    ), f"Tool name cannot be the same as the input type name. {tool.__name__} == {t.__name__}"
             model = dict_to_pydantic_model(
                 tool.__name__,
                 tool_args,
