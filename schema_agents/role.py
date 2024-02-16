@@ -534,7 +534,7 @@ class Role:
             localns=locals(),  # to get FinalResponse
         )
 
-        CompleteUserQuery_model = tool_inputs_models[tools.index(CompleteUserQuery)]
+        complete_user_query_model = tool_inputs_models[tools.index(CompleteUserQuery)]
         all_out_schemas = tool_inputs_models
 
         async def call_tool(tool, args, kwargs):
@@ -601,19 +601,24 @@ class Role:
         internal_tool_names = [s.__name__ for s in internal_tools]
         tool_schema_names = "\n".join([f" - {s.__name__}" for s in tool_inputs_models if s not in internal_tool_names])
         tool_prompt = (
-            "Respond to the user's query by calling the `CompleteUserQuery` tool, listed tools, or `StartNewPlan`:\n"
+            "Respond to the user's query by using the `CompleteUserQuery` tool for final answers, employing listed tools for task-specific inquiries, or creating a plan with `StartNewPlan` for complex tasks:\n"
             f"{tool_schema_names}\n"
-            "Call `CompleteUserQuery` for straightforward queries. For complex ones, draft and log a plan with `StartNewPlan`, adjusting as needed. "
-            "Compile insights from all interactions into a final summary via `CompleteUserQuery`, avoiding intermediate summaries. "
-            "Minimize loops, stay within limits, and reassess after each action to align with the query. Be clear, concise, and transparent. "
-            "If unresolved, state what was tried and consider asking for more details. "
-            "IMPORTANT: Only conclude with a `CompleteUserQuery` call; avoid direct responses until the final summary."
+            "For straightforward questions, call the `CompleteUserQuery`. For more involved queries, employ more tools or draft a plan with `StartNewPlan`, sticking to this strategy unless updates are critically needed. "
+            "Synthesize insights into a final summary with `CompleteUserQuery`, avoiding repetitive outputs. "
+            "Keep loops efficient and within the maximum count, aligning each action with the initial query. Stay concise, clear, and transparent. "
+            "If a query remains open, detail what was attempted and, if needed, ask for further clarification. "
         )
-
+        
         if extra_prompt:
             tool_prompt += f"\n{extra_prompt}"
-            prompt += f"\n{extra_prompt}"
+            if prompt:
+                prompt += f"\n{extra_prompt}"
 
+        messages.append({
+            "role": "system",
+            "content": prompt or tool_prompt # + loop_count_prompt,
+        })
+                
         loop_count = 0
         final_response = None
         current_out_schemas = all_out_schemas
@@ -623,34 +628,42 @@ class Role:
                 f"\nLoop count: {loop_count}/{_max_loop}. Exceeding the max loop count will terminate the process. "
                 "If needed, call `StartNewPlan` to update the maximum loop count as you near the maximum."
             )
+            if loop_count > 1:
+                messages.append({
+                    "role": "system",
+                    "content": loop_count_prompt,
+                })
             tool_calls, metadata = await self.aask(
                 messages,
                 current_out_schemas,
                 use_tool_calls=True,
                 return_metadata=True,
-                prompt=prompt or (tool_prompt + loop_count_prompt),
+                prompt=None,
             )
+
             if isinstance(tool_calls, str):
                 if len(result_steps) > 0:
                     result_steps.append([
                         {"type": "text", "content": tool_calls}
                     ])
-                if output_schema == str:
-                    final_response = tool_calls
-                    break
-                messages.append(
-                    {
-                        "role": "user",
-                        "content": f"VERY IMPORTANT: DO NOT respond with text directly; ALWAYS call tools!",
-                    }
-                )
+                # Force quitting by setting the only tool to CompleteUserQuery
+                current_out_schemas = [ complete_user_query_model ]
+                # if output_schema == str:
+                #     user_query = complete_user_query_model.parse_obj(tool_calls)
+                #     final_response = user_query.response
+                #     break
+                # messages.append(
+                #     {
+                #         "role": "system",
+                #         "content": f"VERY IMPORTANT: DO NOT respond with text directly; ALWAYS call tools!",
+                #     }
+                # )
                 continue
 
             tool_ids = metadata["tool_ids"]
             messages.append({"role": "assistant", "tool_calls": metadata["tool_calls"]})
 
             result_list = []
-            result_steps.append(result_list)
 
             for fargs in tool_calls:
                 idx = tool_inputs_models.index(fargs.__class__)
@@ -663,11 +676,16 @@ class Role:
                         "args": args,
                         "kwargs": kwargs,
                     }
-                    result_list.append(func_info)
+                    if len(result_steps) > 1:
+                        result_list.append(func_info)
                     final_response = fargs.response
                     break
+            
+            
 
             if final_response:
+                if result_list:
+                    result_steps.append(result_list)
                 break
 
             tool_call_reports = await call_tools(tool_calls, tool_ids, result_list)
@@ -683,11 +701,14 @@ class Role:
                     }
                 )
                 # Force quitting by setting the only tool to CompleteUserQuery
-                current_out_schemas = [ CompleteUserQuery_model ]
+                current_out_schemas = [ complete_user_query_model ]
             elif loop_count >= _max:
                 raise RuntimeError(
                     f"Exceeded the maximum loop count: {_max}."
                 )
+                
+            if result_list:
+                result_steps.append(result_list)
 
         if return_metadata:
             return final_response, {"steps": result_steps}
@@ -821,14 +842,35 @@ class Role:
             function_call = {"name": output_types[0].__name__}
         else:
             function_call = "auto"
-        response = await self._llm.aask(
-            messages,
-            system_msgs,
-            functions=functions,
-            function_call=function_call,
-            event_bus=self._event_bus,
-            use_tool_calls=use_tool_calls,
-        )
+        try:
+            response = await self._llm.aask(
+                messages,
+                system_msgs,
+                functions=functions,
+                function_call=function_call,
+                event_bus=self._event_bus,
+                use_tool_calls=use_tool_calls,
+                raise_for_string_output=not allow_str_output,
+            )
+        except ValueError:
+            if allow_str_output:
+                raise
+            messages.append(
+                {
+                    "role": "system",
+                    "content": f"IMPORTANT: DO NOT respond with text directly; ALWAYS call tools!",
+                }
+            )
+            # try again
+            response = await self._llm.aask(
+                messages,
+                system_msgs,
+                functions=functions,
+                function_call=function_call,
+                event_bus=self._event_bus,
+                use_tool_calls=use_tool_calls,
+                raise_for_string_output=not allow_str_output,
+            )
 
         try:
             assert not isinstance(response, str), f"Invalid response. {prompt}"
@@ -845,7 +887,7 @@ class Role:
             messages.append({"role": "assistant", "content": str(response)})
             messages.append(
                 {
-                    "role": "user",
+                    "role": "system",
                     "content": f"Failed to parse the response, error:\n{traceback.format_exc()}\nPlease regenerate to fix the error.",
                 }
             )
