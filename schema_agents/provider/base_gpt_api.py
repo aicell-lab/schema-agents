@@ -45,7 +45,7 @@ class BaseGPTAPI(BaseChatbot):
             return rsp.get("choices")[0]["message"].get("function_call")
         return self.get_choice_text(rsp)
 
-    async def aask(self, msg: Union[str, Dict[str, str], List[Dict[str, str]]], system_msgs: Optional[list[str]] = None, functions: List[Dict[str, Any]]=None, function_call: Union[str, Dict[str, str]]=None, event_bus: EventBus=None, use_tool_calls=True) -> str:
+    async def aask(self, msg: Union[str, Dict[str, str], List[Dict[str, str]]], system_msgs: Optional[list[str]] = None, functions: List[Dict[str, Any]]=None, function_call: Union[str, Dict[str, str]]=None, event_bus: EventBus=None, use_tool_calls=True, raise_for_string_output=False) -> str:
         if isinstance(msg, list):
             messages = []
             for m in msg:
@@ -71,11 +71,11 @@ class BaseGPTAPI(BaseChatbot):
                     tool_choice = {"type": "function", "function": function_call}
                 else:
                     tool_choice = function_call
-                rsp = await self.acompletion_tool(messages, tools=[{"type": "function", "function": func} for func in functions], tool_choice=tool_choice, event_bus=event_bus)
+                rsp = await self.acompletion_tool(messages, tools=[{"type": "function", "function": func} for func in functions], tool_choice=tool_choice, event_bus=event_bus, raise_for_string_output=raise_for_string_output)
             else:
-                rsp = await self.acompletion_function(messages, functions=functions, function_call=function_call, event_bus=event_bus)
+                rsp = await self.acompletion_function(messages, functions=functions, function_call=function_call, event_bus=event_bus, raise_for_string_output=raise_for_string_output)
         else:
-            rsp = await self.acompletion_tool(messages, event_bus=event_bus)
+            rsp = await self.acompletion_tool(messages, event_bus=event_bus, raise_for_string_output=raise_for_string_output)
         # logger.debug(message)
         logger.debug(rsp)
         return rsp
