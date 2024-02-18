@@ -1,4 +1,5 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
+from langchain_community.vectorstores.faiss import FAISS
 
 class File(BaseModel):
     """A file"""
@@ -22,6 +23,10 @@ class PublicDataSet(BaseModel):
     data_generation_summary : str = Field(..., description="A summary of how the data was generated")
     samples_description: str = Field(..., description="A detailed description of the samples in the data set")
     data_files : list[DataFile] = Field(..., description="A list of the data files in the data set and a description of each file")
+
+class ScrapedGEOPage(PublicDataSet):
+    """A page scraped from the NCBI GEO database"""
+    pass
 
 class GEODataSet(PublicDataSet):
     """A data set from the NCBI GEO database"""
@@ -50,9 +55,26 @@ class InformaticHypotheses(Hypotheses):
 
     
 
+class MainFindings(BaseModel):
+    """The main findings of a paper"""
+    main_findings: str = Field(..., description="The main findings of the paper")
+                               
+class ComputationalMethods(BaseModel):
+    """The computational methods used in a paper"""
+    computational_methods: str = Field(..., description="The computational methods used in the paper")
+
+class ExperimentalMethods(BaseModel):
+    """The experimental methods used in a paper"""
+    experimental_methods: str = Field(..., description="The experimental methods used in the paper")
+
+class Samples(BaseModel):
+    """The samples used in a paper"""
+    samples: str = Field(..., description="The samples used in the paper")
 
 class PaperSummary(BaseModel):
     """A summary of a paper"""
-    title: str = Field(..., description="The title of the paper")
-    topics: str = Field(..., description="The keyword topics of the paper")
-    main_findings: str = Field(..., description="The main findings of the paper")
+    # topics: str = Field(..., description="The keyword topics of the paper")
+    main_findings: MainFindings = Field(..., description="The main findings of the paper")
+    computational_methods: ComputationalMethods = Field(..., description="The computational methods used in the paper")
+    experimental_methods: ExperimentalMethods = Field(..., description="The experimental methods used in the paper")
+    samples: Samples = Field(..., description="The samples used in the paper")
