@@ -486,7 +486,6 @@ class Role:
         messages, _ = self._normalize_messages(req)
         _max_loop = 5
 
-
         async def CompleteUserQuery(
             response: output_schema = Field(
                 ..., description="Final response based on all the previous tool calls."
@@ -599,7 +598,13 @@ class Role:
         # fix_doc = lambda doc: doc.replace("\n", ";")[:100]
         # tool_entry = lambda s: f" - {s.__name__}: {fix_doc(s.__doc__)}"
         internal_tool_names = [s.__name__ for s in internal_tools]
-        tool_schema_names = "\n".join([f" - {s.__name__}" for s in tool_inputs_models if s not in internal_tool_names])
+        tool_schema_names = "\n".join(
+            [
+                f" - {s.__name__}"
+                for s in tool_inputs_models
+                if s not in internal_tool_names
+            ]
+        )
         tool_prompt = (
             "Respond to the user's query by using the `CompleteUserQuery` tool for final answers, employing listed tools for task-specific inquiries, or creating a plan with `StartNewPlan` for complex tasks:\n"
             f"{tool_schema_names}\n"
@@ -608,17 +613,16 @@ class Role:
             "Keep loops efficient and within the maximum count, aligning each action with the initial query. Stay concise, clear, and transparent. "
             "If a query remains open, detail what was attempted and, if needed, ask for further clarification. "
         )
-        
+
         if extra_prompt:
             tool_prompt += f"\n{extra_prompt}"
             if prompt:
                 prompt += f"\n{extra_prompt}"
 
-        messages.append({
-            "role": "system",
-            "content": prompt or tool_prompt # + loop_count_prompt,
-        })
-                
+        messages.append(
+            {"role": "system", "content": prompt or tool_prompt}  # + loop_count_prompt,
+        )
+
         loop_count = 0
         final_response = None
         current_out_schemas = all_out_schemas
@@ -629,10 +633,12 @@ class Role:
                 "If needed, call `StartNewPlan` to update the maximum loop count as you near the maximum."
             )
             if loop_count > 1:
-                messages.append({
-                    "role": "system",
-                    "content": loop_count_prompt,
-                })
+                messages.append(
+                    {
+                        "role": "system",
+                        "content": loop_count_prompt,
+                    }
+                )
             tool_calls, metadata = await self.aask(
                 messages,
                 current_out_schemas,
@@ -643,11 +649,9 @@ class Role:
 
             if isinstance(tool_calls, str):
                 if len(result_steps) > 0:
-                    result_steps.append([
-                        {"type": "text", "content": tool_calls}
-                    ])
+                    result_steps.append([{"type": "text", "content": tool_calls}])
                 # Force quitting by setting the only tool to CompleteUserQuery
-                current_out_schemas = [ complete_user_query_model ]
+                current_out_schemas = [complete_user_query_model]
                 # if output_schema == str:
                 #     user_query = complete_user_query_model.parse_obj(tool_calls)
                 #     final_response = user_query.response
@@ -680,8 +684,6 @@ class Role:
                         result_list.append(func_info)
                     final_response = fargs.response
                     break
-            
-            
 
             if final_response:
                 if result_list:
@@ -701,12 +703,10 @@ class Role:
                     }
                 )
                 # Force quitting by setting the only tool to CompleteUserQuery
-                current_out_schemas = [ complete_user_query_model ]
+                current_out_schemas = [complete_user_query_model]
             elif loop_count >= _max:
-                raise RuntimeError(
-                    f"Exceeded the maximum loop count: {_max}."
-                )
-                
+                raise RuntimeError(f"Exceeded the maximum loop count: {_max}.")
+
             if result_list:
                 result_steps.append(result_list)
 
@@ -743,7 +743,14 @@ class Role:
     @retry(
         stop=stop_after_attempt(2),
         wait=wait_fixed(1),
-        retry=retry_if_exception_type((openai.APITimeoutError, ValidationError)),
+        retry=retry_if_exception_type(
+            (
+                openai.APITimeoutError,
+                openai.APIError,
+                openai.APIConnectionError,
+                ValidationError,
+            )
+        ),
         retry_error_callback=lambda retry_state: f"Failed after {retry_state.attempt_number} attempts",
     )
     async def aask(
