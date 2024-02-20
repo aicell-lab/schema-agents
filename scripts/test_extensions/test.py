@@ -61,5 +61,7 @@ def create_assistants():
 
 if __name__ == "__main__":
     assistant = create_assistants()[0]
-    response = asyncio.run(assistant['agent'].handle(Message(content = "What is the best model for image segmentation?")))
+    # print(assistant)
+    user_query = "Search the web for information about apples, specifically I want to know the average caloric content of a single apple"
+    response = asyncio.run(assistant['agent'].handle(Message(content = user_query, role = "User")))
 
