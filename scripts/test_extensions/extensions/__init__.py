@@ -13,6 +13,16 @@ class AgentExtension(BaseModel):
     execute: Callable = Field(..., description="The extension's execution function")
     schema_class: Optional[BaseModel] = Field(None, description="The schema class for the extension")
 
+def convert_to_dict(obj):
+    if isinstance(obj, BaseModel):
+        return obj.dict()
+    if isinstance(obj, dict):
+        return {k: convert_to_dict(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [convert_to_dict(v) for v in obj]
+    return obj
+
+
 def extract_schemas(function):
     sig = signature(function)
     positional_annotation = [

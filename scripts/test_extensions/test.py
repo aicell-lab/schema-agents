@@ -1,3 +1,4 @@
+import asyncio
 import extensions
 from pydantic import BaseModel, Field
 from typing import Optional
@@ -15,6 +16,8 @@ class RichResponse(BaseModel):
     steps : Optional[list[ResponseStep]] = Field(None, description = "Intermediate steps")
 
 def create_assistants():
+
+    builtin_extensions = extensions.get_builtin_extensions()
     
     async def respond(
             query : str, role : Role = None
@@ -22,7 +25,6 @@ def create_assistants():
         """Answers the user's question directory or retrieve relevant information, or create a Python Script to get information about details of models."""
         steps = []
         inputs = (query)
-        builtin_extensions = extensions.get_builtin_extensions()
         tools = []
         for extension in builtin_extensions:
             tool = await extensions.extension_to_tool(extension)
@@ -42,7 +44,7 @@ def create_assistants():
             steps.append(
                 ResponseStep(
                     name = f"step-{idx}",
-                    details = {"details" : convert_to_dict(step_list)}
+                    details = {"details" : extensions.convert_to_dict(step_list)}
                 )
             )
         return RichResponse(text = response, steps = steps)
@@ -59,4 +61,5 @@ def create_assistants():
 
 if __name__ == "__main__":
     assistant = create_assistants()[0]
-    print(assistant)
+    response = asyncio.run(assistant['agent'].handle(Message(content = "What is the best model for image segmentation?")))
+
