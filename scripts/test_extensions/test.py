@@ -1,3 +1,4 @@
+from typing import List
 import time
 import sys
 import os
@@ -7,6 +8,22 @@ from pydantic import BaseModel, Field
 from typing import Optional
 from schema_agents.role import Role
 from schema_agents.schema import Message
+from extensions.paperqa_extension import Paper
+
+class ThoughtsSchema(BaseModel):
+    """Details about the thoughts"""
+    reasoning: str = Field(..., description="reasoning and constructive self-criticism; make it short and concise in less than 20 words")
+
+class PaperResults(BaseModel):
+    """A summary of a scientific paper"""
+    key_topics: List[str] = Field(description="The keyword topics of the paper")
+    is_informatic : bool = Field(description="Whether the paper involved informatic, computational, or data analysis that involves coding")
+    key_findings : List[str] = Field(description="The key findings of the paper")
+    methods : List[str] = Field(description="The methods used in the paper")
+
+class ReproductionPlan(BaseModel):
+    """A plan to reproduce the results of a paper"""
+    plan : str = Field(description="The plan to reproduce the results of the paper")
 
 class ResponseStep(BaseModel):
     """Response step"""
@@ -21,10 +38,37 @@ class RichResponse(BaseModel):
 def create_assistants():
 
     builtin_extensions = extensions.get_builtin_extensions()
+
+    async def get_all_paper_info(paper : Paper, role: Role = None) -> RichResponse:
+        """Make then execute a plan to get all the information about a scientific paper necessary to reproduce its results. Use a combination of websearch and paperqa as many times as necessary to get all the information you need"""
+        steps = []
+        inputs = [paper]
+        tools = []
+        for extension in builtin_extensions:
+            tool = await extensions.extension_to_tool(extension)
+            tools.append(tool)
+        
+        response, metadata = await role.acall(inputs,
+                                              tools,
+                                              return_metadata=True,
+                                              thoughts_schema=ThoughtsSchema,
+                                              max_loop_count = 10)
+        with open(os.devnull, 'w') as devnull:
+            print(response, file=devnull)
+        # return response
+        result_steps = metadata['steps']
+        for idx, step_list in enumerate(result_steps):
+            steps.append(
+                ResponseStep(
+                    name = f"step-{idx}",
+                    details = {"details" : extensions.convert_to_dict(step_list)}
+                )
+            )
+        return RichResponse(text = response, steps = steps)
+        
+        
     
-    async def respond(
-            query : str, role : Role = None
-    ) -> RichResponse:
+    async def respond(query : str, role : Role = None) -> RichResponse:
         """Answers the user's question directory or retrieve relevant information, or create a Python Script to get information about details of models."""
         steps = []
         inputs = [query]
@@ -33,10 +77,6 @@ def create_assistants():
         for extension in builtin_extensions:
             tool = await extensions.extension_to_tool(extension)
             tools.append(tool)
-        
-        class ThoughtsSchema(BaseModel):
-            """Details about the thoughts"""
-            reasoning: str = Field(..., description="reasoning and constructive self-criticism; make it short and concise in less than 20 words")
         
         response, metadata = await role.acall(inputs,
                                               tools,
@@ -56,6 +96,12 @@ def create_assistants():
             )
         return RichResponse(text = response, steps = steps)
     
+    paper_summarizer = Role(
+        instructions = "You are the paper summarizer, a helpful agent for summarizing scientific papers and finding all the information necessary to reproduce the results",
+        actions = [get_all_paper_info],
+        model = "gpt-4-0125-preview",
+    )
+    
     assistant = Role(
         instructions = "You are the assistant, a helpful agent for helping the user",
         actions = [respond],
@@ -65,15 +111,20 @@ def create_assistants():
     event_bus.register_default_events()
     all_extensions = [{"name" : ext.name, "description" : ext.description} for ext in builtin_extensions]
     return [{"name" : "assistant", "agent" : assistant, "extensions" : all_extensions}]
+    # return [{"name" : "assistant", "agent" : paper_summarizer, "extensions" : all_extensions}]
 
 
 
 async def main():
     assistant = create_assistants()[0]['agent']
-    # event_bus = alice.get_event_bus()
-    # event_bus.register_default_events()
-    user_query = "Make a plan to find NCBI datasets relevant to digital microfluidics using the NCBI eutils API, then execute it to find the datasets."
+    # user_query = "Make a plan for reproducing the paper located at '/Users/gkreder/Downloads/2024-02-01_exponential_chain/GSE254364/405.pdf'"
+    user_query = "Make a detailed plan for reproducing the paper located at '/Users/gkreder/Downloads/2024-02-01_exponential_chain/GSE254364/405.pdf'. Use as many calls to websearch and paperqa as necessary to get all the information you need"
     responses = await assistant.handle(Message(content=user_query, role="User"))
+
+    # assistant = create_assistants()[0]['agent']
+    # user_query = "Make a detailed plan for reproducing the paper. Use as many calls to websearch and paperqa as necessary to get all the information you need"
+    # user_data = Paper(location = '/Users/gkreder/Downloads/2024-02-01_exponential_chain/GSE254364/405.pdf', location_type = "file")
+    # responses = await assistant.handle(Message(content=user_query, data=user_data, role="User"))
     print(responses)
 
 if __name__ == "__main__":
