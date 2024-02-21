@@ -640,7 +640,7 @@ class Role:
                 messages.append(
                     {
                         "role": "assistant",
-                        "content": f"[Internal Comment]:\n{tool_calls}"
+                        "content": tool_calls if tool_calls.startswith("Internal Comment:") else f"[Internal Comment]: {tool_calls}",
                     }
                 )
                 continue
