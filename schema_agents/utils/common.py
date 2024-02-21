@@ -21,6 +21,10 @@ def check_cmd_exists(command) -> int:
     return result
 
 
+class UnexpectedStringOutputError(Exception):
+    pass
+
+
 class NoMoneyException(Exception):
     """Raised when the operation cannot be completed due to insufficient funds"""
 

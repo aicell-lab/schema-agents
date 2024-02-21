@@ -26,7 +26,7 @@ from schema_agents.utils.token_counter import (
     count_string_tokens,
     get_max_completion_tokens,
 )
-from schema_agents.utils.common import EventBus, current_session
+from schema_agents.utils.common import EventBus, UnexpectedStringOutputError, current_session
 from schema_agents.schema import StreamEvent
 from contextvars import copy_context
 
@@ -232,7 +232,7 @@ class OpenAIGPTAPI(BaseGPTAPI, RateLimiter):
                     function_call_detected = True
                 elif "content" in chunk_message and chunk_message["content"]:
                     if raise_for_string_output:
-                        raise ValueError(f"Received a string output: {chunk_message['content']}")
+                        raise UnexpectedStringOutputError(f"Received a unexpected string output: {chunk_message['content']}")
                     if event_bus:
                         acc_message += chunk_message["content"]
                         if acc_message == chunk_message["content"]:
