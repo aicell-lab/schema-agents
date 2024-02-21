@@ -14,8 +14,6 @@ from inspect import signature
 from typing import Iterable, Optional, Union, Callable, List
 from pydantic import BaseModel, Field, ValidationError
 from pydantic.fields import FieldInfo
-from tenacity import retry, stop_after_attempt, wait_fixed, retry_if_exception_type
-import openai
 
 from schema_agents.logs import logger
 from schema_agents.utils import parse_special_json, schema_to_function
@@ -260,7 +258,6 @@ class Role:
             return True
         return False
 
-    # @retry(stop=stop_after_attempt(2), wait=wait_fixed(1))
     async def handle(self, msg: Union[str, Message]) -> list[Message]:
         """Handle message"""
         if isinstance(msg, str):
@@ -606,12 +603,11 @@ class Role:
             ]
         )
         tool_prompt = (
-            "Respond to the user's query by using the `CompleteUserQuery` tool for final answers, employing listed tools for task-specific inquiries, or creating a plan with `StartNewPlan` for complex tasks:\n"
+            "Address the user's query exclusively through the `CompleteUserQuery` tool for final responses. Utilize listed tools for specific tasks or `StartNewPlan` for planning complex tasks:\n"
             f"{tool_schema_names}\n"
-            "For straightforward questions, call the `CompleteUserQuery`. For more involved queries, employ more tools or draft a plan with `StartNewPlan`, sticking to this strategy unless updates are critically needed. "
-            "Synthesize insights into a final summary with `CompleteUserQuery`, avoiding repetitive outputs. "
-            "Keep loops efficient and within the maximum count, aligning each action with the initial query. Stay concise, clear, and transparent. "
-            "If a query remains open, detail what was attempted and, if needed, ask for further clarification. "
+            "Directly use `CompleteUserQuery` for straightforward queries. For more complex inquiries, integrate additional tools or create a strategic plan with `StartNewPlan`, adhering to this approach unless significant updates are necessary. Compile all insights into one final summary via `CompleteUserQuery`. Text responses generated during the process will serve as comments in the loop history and will not be shown to users. "
+            "Ensure loops are concise and within limits, keeping each action relevant to the original query. If the query is unresolved, outline your approach for internal review and, if required, seek further clarification. "
+            "IMPORTANT: The only way to communicate a response to the user is by calling `CompleteUserQuery`. All text responses will be prefixed with `[Internal Comment]:`, contributing to the loop history but not visible to users."
         )
 
         if extra_prompt:
@@ -632,36 +628,21 @@ class Role:
                 f"\nLoop count: {loop_count}/{_max_loop}. Exceeding the max loop count will terminate the process. "
                 "If needed, call `StartNewPlan` to update the maximum loop count as you near the maximum."
             )
-            if loop_count > 1:
-                messages.append(
-                    {
-                        "role": "system",
-                        "content": loop_count_prompt,
-                    }
-                )
             tool_calls, metadata = await self.aask(
                 messages,
                 current_out_schemas,
                 use_tool_calls=True,
                 return_metadata=True,
-                prompt=None,
+                prompt=loop_count_prompt,
+                raise_for_string_output=False,
             )
-
             if isinstance(tool_calls, str):
-                if len(result_steps) > 0:
-                    result_steps.append([{"type": "text", "content": tool_calls}])
-                # Force quitting by setting the only tool to CompleteUserQuery
-                current_out_schemas = [complete_user_query_model]
-                # if output_schema == str:
-                #     user_query = complete_user_query_model.parse_obj(tool_calls)
-                #     final_response = user_query.response
-                #     break
-                # messages.append(
-                #     {
-                #         "role": "system",
-                #         "content": f"VERY IMPORTANT: DO NOT respond with text directly; ALWAYS call tools!",
-                #     }
-                # )
+                messages.append(
+                    {
+                        "role": "assistant",
+                        "content": tool_calls if tool_calls.startswith("Internal Comment:") else f"[Internal Comment]: {tool_calls}",
+                    }
+                )
                 continue
 
             tool_ids = metadata["tool_ids"]
@@ -740,19 +721,6 @@ class Role:
             prompt += " DO NOT respond with text directly."
         return prompt
 
-    @retry(
-        stop=stop_after_attempt(2),
-        wait=wait_fixed(1),
-        retry=retry_if_exception_type(
-            (
-                openai.APITimeoutError,
-                openai.APIError,
-                openai.APIConnectionError,
-                ValidationError,
-            )
-        ),
-        retry_error_callback=lambda retry_state: f"Failed after {retry_state.attempt_number} attempts",
-    )
     async def aask(
         self,
         req,
@@ -761,6 +729,7 @@ class Role:
         use_tool_calls=False,
         return_metadata=False,
         extra_schemas=None,
+        raise_for_string_output=None,
     ):
 
         assert extra_schemas is None or isinstance(extra_schemas, list)
@@ -849,35 +818,15 @@ class Role:
             function_call = {"name": output_types[0].__name__}
         else:
             function_call = "auto"
-        try:
-            response = await self._llm.aask(
-                messages,
-                system_msgs,
-                functions=functions,
-                function_call=function_call,
-                event_bus=self._event_bus,
-                use_tool_calls=use_tool_calls,
-                raise_for_string_output=not allow_str_output,
-            )
-        except ValueError:
-            if allow_str_output:
-                raise
-            messages.append(
-                {
-                    "role": "system",
-                    "content": f"IMPORTANT: DO NOT respond with text directly; ALWAYS call tools!",
-                }
-            )
-            # try again
-            response = await self._llm.aask(
-                messages,
-                system_msgs,
-                functions=functions,
-                function_call=function_call,
-                event_bus=self._event_bus,
-                use_tool_calls=use_tool_calls,
-                raise_for_string_output=not allow_str_output,
-            )
+        response = await self._llm.aask(
+            messages,
+            system_msgs,
+            functions=functions,
+            function_call=function_call,
+            event_bus=self._event_bus,
+            use_tool_calls=use_tool_calls,
+            raise_for_string_output=raise_for_string_output if raise_for_string_output is not None else (not allow_str_output),
+        )
 
         try:
             assert not isinstance(response, str), f"Invalid response. {prompt}"
