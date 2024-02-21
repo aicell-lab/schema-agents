@@ -118,7 +118,8 @@ def create_assistants():
 async def main():
     assistant = create_assistants()[0]['agent']
     # user_query = "Make a plan for reproducing the paper located at '/Users/gkreder/Downloads/2024-02-01_exponential_chain/GSE254364/405.pdf'"
-    user_query = "Make a detailed plan for reproducing the paper located at '/Users/gkreder/Downloads/2024-02-01_exponential_chain/GSE254364/405.pdf'. Use as many calls to websearch and paperqa as necessary to get all the information you need"
+    user_query = """Make a detailed plan for reproducing the paper located at '/Users/gkreder/Downloads/2024-02-01_exponential_chain/GSE254364/405.pdf'. 
+    Use as many calls to websearch and paperqa as necessary to get all the information you need. The plan should be EXTREMELY detailed, it should include all the detailed steps for how to access data, download packages, and run code"""
     responses = await assistant.handle(Message(content=user_query, role="User"))
 
     # assistant = create_assistants()[0]['agent']
@@ -126,6 +127,8 @@ async def main():
     # user_data = Paper(location = '/Users/gkreder/Downloads/2024-02-01_exponential_chain/GSE254364/405.pdf', location_type = "file")
     # responses = await assistant.handle(Message(content=user_query, data=user_data, role="User"))
     print(responses)
+    print('\n\n\n')
+    print(respones[-1].text)
 
 if __name__ == "__main__":
     loop = asyncio.get_event_loop()
