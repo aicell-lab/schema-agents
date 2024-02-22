@@ -10,6 +10,7 @@ from typing import Optional
 from schema_agents.role import Role
 from schema_agents.schema import Message
 from extensions.paperqa_extension import Paper
+import extensions.team_designer_extension as team_designer_extension
 
 class ThoughtsSchema(BaseModel):
     """Details about the thoughts"""
@@ -26,18 +27,14 @@ class RichResponse(BaseModel):
     steps : Optional[list[ResponseStep]] = Field(None, description = "Intermediate steps")
 
 def create_assistants():
-
-    assistant_extensions = [extensions.get_extension_by_name("team_designer")]
-
     async def respond(query : str, role : Role = None) -> RichResponse:
-        """Answers the user's question directory or retrieve relevant information, or create a Python Script to get information about details of models."""
+        """Answers the user's question directory or create a team to solve the task, monitor its results, and revise the team if necessary."""
+        draft_team = await team_designer_extension.run_extension(query)
+        
+
         steps = []
         inputs = [query]
-        tools = []
-        for extension in assistant_extensions:
-            tool = await extensions.extension_to_tool(extension)
-            tools.append(tool)
-        
+        tools = [team_designer_extension.run_extension]
         response, metadata = await role.acall(inputs,
                                               tools,
                                               return_metadata=True,
@@ -60,8 +57,7 @@ def create_assistants():
     )
     event_bus = manager.get_event_bus()
     event_bus.register_default_events()
-    all_extensions = [{"name" : ext.name, "description" : ext.description} for ext in assistant_extensions]
-    return [{"name" : "manager", "agent" : manager, "extensions" : all_extensions}]
+    return manager
 
 async def main():
     # manager = create_assistants()[0]['agent']
@@ -70,8 +66,10 @@ async def main():
     # user_query = """Tell me how many calories are in an apple"""
     # responses = await manager.handle(Message(content=user_query, role="User"))
 
-    manager = create_assistants()[0]['agent']
-    user_query = "Make a team that will read a paper and make a detailed plan for reproducing the paper."
+    # manager = create_assistants()[0]['agent']
+    manager = create_assistants()
+    # user_query = "Make a team that will read a paper and make a detailed plan for reproducing the paper."
+    user_query = """Make a team and use it solve the following problem: `Understand and reproduce the results from the paper located at '/Users/gkreder/gdrive/exponential-chain/GSE254364/405.pdf'.`"""
     responses = await manager.handle(Message(content=user_query, role="User"))
 
     # manager = create_assistants()[0]['agent']

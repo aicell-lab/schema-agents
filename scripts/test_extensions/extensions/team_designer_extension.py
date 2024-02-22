@@ -1,6 +1,6 @@
 import asyncio
 from paperqa import Docs
-from typing import List, Optional
+from typing import List, Optional, Union
 from pydantic import BaseModel, Field
 from bioimageio_chatbot.utils import ChatbotExtension
 import asyncio
@@ -8,25 +8,13 @@ from schema_agents.role import Role, Message
 
 
 class SchemaActionOutline(BaseModel):
-     """A detailed description of a python function containing type annotations, a function signature, and pseudocode for the function body"""
-     content: str = Field(description = """The python function for performing the desired task. 
-                          This should always contain a keyword argument called `role` of type `Role` that defaults to None. """)
+    """An action performed by an agent. An action takes either a string or a `SchemaClass` as input and returns a string or a `SchemaClass` as output"""
+    name : str = Field(description = "The name of the action. It contains NO spaces and NO special characters. It should be written in snake_case format.")
+    input_type: Union[str, BaseModel] = Field(description = """The input type for the action. This can be a string or a `SchemaClass`""")
+    output_type: Union[str, BaseModel] = Field(description = """The output type for the action. This can be a string or a `SchemaClass`""")
+    description: str = Field(description = "A description of the action")
 
-schema_action_prompt='''The finalized implemented python function. The function must follow the form
-```
-async def function_name(input_arg : input_arg_type, role: Role = None) -> output_type:
-"""docstring for the function"""
-input_arg = transform_input(input_arg) # optionally transform the input_arg or directly pass it into the next line, in the transform, we can unpack values, provide additional information etc. 
-response = await role.aask(input_arg, output_type)
-return(response)
-```
-'''
 
-class SchemaActionImplemented(BaseModel):
-    """An implemented python function based off a function outline that uses built-in python libraries 
-    to execute the desired action according to the pseudocode in the function outline body"""
-    content: str = Field(description = schema_action_prompt)
-     
 
 class SchemaAgentOutline(BaseModel):
      """A autonomous agent capable of carrying out actions according to input and output schema"""
@@ -41,15 +29,21 @@ class SchemaClass(BaseModel):
     field_descriptions: List[str] = Field(description = "A detailed description of each of the class's fields")
     class_description: str = Field(description = "A detailed description of the class")
 
+# class TeamOutline(BaseModel):
+#     """An outline for a team of agents to accomplish a given task"""
+#     name: str = Field(description="The name of the team")
+#     profile: str = Field(description="The profile of the team.")
+#     goal: str = Field(description="The goal for the team")
+#     agents: List[SchemaAgentOutline] = Field(description = "The agents involved in the task")
+#     classes: List[SchemaClass] = Field(description = """The classes passed between agents via actions. Each class consists of a list of fields that must be type annotated.""")
+#     actions: List[SchemaActionOutline] = Field(description = "The actions between each agent")
+    
 class TeamOutline(BaseModel):
     """An outline for a team of agents to accomplish a given task"""
     name: str = Field(description="The name of the team")
     profile: str = Field(description="The profile of the team.")
     goal: str = Field(description="The goal for the team")
-    agents: List[SchemaAgentOutline] = Field(description = "The agents involved in the task")
-    classes: List[SchemaClass] = Field(description = """The classes passed between agents via actions. Each class consists of a list of fields that must be type annotated.
-                                       """)
-    actions: List[str] = Field(description = "The actions between each agent")
+    actions: List[SchemaActionOutline] = Field(description = "The sequential list of actions between the agents that will solve the task")
 
 
 async def make_team_outline(task: str, role: Role = None) -> TeamOutline:
@@ -59,6 +53,7 @@ async def make_team_outline(task: str, role: Role = None) -> TeamOutline:
 
 
 async def run_extension(query : str) -> TeamOutline:
+    """Take the input task and design a team of autonomous agents that will carry out the task according to the user's needs"""
     assistant = Role(
         instructions = "You are a team creator, your role is to create a team of agents to accomplish a given task",
         actions = [make_team_outline],
@@ -88,7 +83,7 @@ async def main():
     # user_query = """Tell me how many calories are in an apple"""
     # responses = await assistant.handle(Message(content=user_query, role="User"))
 
-    team_outline = await run_extension("There are 3 animals in a room, 2 leave. How many are left?")
+    team_outline = await run_extension("Design a team that will solve the following problem: `There are 3 animals in a room, 2 leave. How many are left?`")
     print(team_outline)
 
 if __name__ == "__main__":
