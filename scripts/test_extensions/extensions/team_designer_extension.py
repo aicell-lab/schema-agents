@@ -58,7 +58,7 @@ class SchemaActionImplemented(SchemaActionOutline):
     
 class FlowOutline(BaseModel):
     """An outline for a flow of actions to accomplish a given task"""
-    steps : list[SchemaActionOutline] = Field(description = "The sequential list of actions between the agents that will solve the task")
+    steps : list[SchemaActionOutline] = Field(description = "The sequential list of actions between the agents that will solve the task. The output_schema of one action MUST match the input_schema of the next action.")
 
 class FlowImplemented(BaseModel):
     """A flow of actions to accomplish a given task"""
@@ -107,7 +107,6 @@ async def run_extension(query : str) -> TeamOutline:
         actions = [make_team_outline],
         model = "gpt-4-0125-preview",
     )
-    # team_outline = await make_team_outline(query, assistant)
     event_bus = assistant.get_event_bus()
     event_bus.register_default_events()
     team_outline = await assistant.aask(query, TeamOutline)
@@ -124,10 +123,15 @@ async def run_extension(query : str) -> TeamOutline:
         for sd in [step.input_schema, step.output_schema]:
             if sd.class_name not in schema_drafts:
                 schema_drafts[sd.class_name] = sd
-    implemented_schemas = {}
-    for sd in schema_drafts.values():
-        implemented_schema = await assistant.aask(sd, SchemaClassImplemented)
-        implemented_schemas[sd.class_name] = implemented_schema
+    
+    # Use gather syntax to make the requests concurrently
+    implemented_schemas = await asyncio.gather(*[assistant.aask(sd, SchemaClassImplemented) for sd in schema_drafts.values()])
+    implemented_schemas = {sd.class_name : sd for sd in implemented_schemas}
+
+    # implemented_schemas = {}
+    # for sd in schema_drafts.values():
+        # implemented_schema = await assistant.aask(sd, SchemaClassImplemented)
+        # implemented_schemas[sd.class_name] = implemented_schema
     for step in flow_outline.steps:
         implemented_step = SchemaActionImplemented(
             name = step.name,
