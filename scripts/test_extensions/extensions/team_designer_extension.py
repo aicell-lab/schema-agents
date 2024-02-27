@@ -130,10 +130,6 @@ async def run_extension(query : str) -> TeamOutline:
     implemented_schemas = await asyncio.gather(*[assistant.aask(sd, SchemaClassImplemented) for sd in schema_drafts.values()])
     implemented_schemas = {sd.class_name : sd for sd in implemented_schemas}
 
-    # implemented_schemas = {}
-    # for sd in schema_drafts.values():
-        # implemented_schema = await assistant.aask(sd, SchemaClassImplemented)
-        # implemented_schemas[sd.class_name] = implemented_schema
     for step in flow_outline.steps:
         implemented_step = SchemaActionImplemented(
             name = step.name,
@@ -146,7 +142,7 @@ async def run_extension(query : str) -> TeamOutline:
     flow_implemented = FlowImplemented(steps = implemented_steps)
     with open('flow_implemented.json', 'w') as f:
         json.dump(json.loads(flow_implemented.json()), f, ensure_ascii = False, indent=4)
-    return flow_implemented
+    return flow_implemented, team_outline
 
 
 
@@ -158,6 +154,29 @@ def get_extensions():
             execute=run_extension,
         )
     ]
+async def get_pydantic_model(schema: SchemaClassImplemented) -> Type[BaseModel]:
+    try:
+        schema_type = create_pydantic_model_from_schema(schema)
+    except Exception as e:
+        print(e)
+        pydantic_assistant = Role(
+            name = "PydanticAssistant",
+            instructions = "You are the pydantic model creator, your role is to create a pydantic model from a schema",
+            model = "gpt-4-0125-preview")
+        res = await pydantic_assistant.aask(f"Failed to instantiate schema from SchemaClassImplemented: {schema}. Please try generating again. Error was the following: {str(e)}", SchemaClassImplemented)
+        schema_type = create_pydantic_model_from_schema(res)
+    
+    return schema_type
+
+async def create_initial_input(user_input : str, execution_flow : FlowImplemented) -> Type[BaseModel]:
+
+    schema_type = create_pydantic_model_from_schema(execution_flow.steps[0].input_schema)
+    input_preparer = Role(
+        name = "InputPreparer",
+        instructions = "You are the input preparer, your role is to prepare the input for the first action in the execution flow",
+        model = "gpt-4-0125-preview",
+    )
+    response = await input_preparer.aask(user_input, schema_type)
 
 
 async def run_flow(execution_flow : FlowImplemented, team_outline : TeamOutline) -> str:
@@ -172,25 +191,20 @@ async def run_flow(execution_flow : FlowImplemented, team_outline : TeamOutline)
     # async def execute_flow(implemented_fow : FlowImplemented):
     flow_object = 'Initial request'
     flow_objects = []
-    for step in flow_implemented.steps:
+    for step in execution_flow.steps:
         agent_name = step.agent.name
-        success = False
-        try:
-            schema_type = create_pydantic_model_from_schema(step.output_schema)
-        except Exception as e:
-            print(e)
-            res = await assistant.aask(f"Failed to instantiate schema from SchemaClassImplemented: {step.output_schema}. Please try generating again. Error was the following: {str(e)}", SchemaClassImplemented)
-            schema_type = create_pydantic_model_from_schema(res)
+        schema_type = await get_pydantic_model(step.output_schema)
         call_fun = team_instance[agent_name].acall([flow_object, step.description], tools = [], output_schema = schema_type, thoughts_schema = ThoughtsSchema, max_loop_count = 10, return_metadata = True)
         response, metadata = await call_fun
         flow_object = response
         flow_objects.append(response)
+    return response, flow_objects
 
 
 async def main():
     # team_outline = await run_extension("Design a team that will solve the following problem: `There are 3 animals in a room, 2 leave. How many are left?`")
-    execution_flow, team_outline = await run_extension("Design a team that will solve the following problem: `I have a PDF file of a scientific paper. I want to understand and reproduce the results from the paper.`")
-    run_result = await run_flow(execution_flow)
+    execution_flow, team_outline = await run_extension("Design a team that will solve the following problem: `I have a PDF file of a scientific paper located at /Users/gkreder/gdrive/exponential-chain/GSE254364/405.pdf. I want to understand and reproduce the results from the paper.`")
+    run_result = await run_flow(execution_flow, team_outline)
     print(run_result)
     #######################################################
     # Call acall on the agent instances
