@@ -66,6 +66,7 @@ class FlowImplemented(BaseModel):
     steps : list[SchemaActionImplemented] = Field(description = "The sequential list of actions between the agents that will solve the task")
 
 def get_python_type(type_str):
+    from datetime import datetime 
     return {
         "str" : str,
         "int" : int,
@@ -145,30 +146,7 @@ async def run_extension(query : str) -> TeamOutline:
     flow_implemented = FlowImplemented(steps = implemented_steps)
     with open('flow_implemented.json', 'w') as f:
         json.dump(json.loads(flow_implemented.json()), f, ensure_ascii = False, indent=4)
-    
-    team_instance = {}
-    for agent in team_outline.agents:
-        agent_instance = Role(
-            name = agent.name,
-            instructions = f"{agent.instructions}",
-            model = "gpt-4-0125-preview",
-        )
-        team_instance[agent.name] = agent_instance
-    # async def execute_flow(implemented_fow : FlowImplemented):
-    for step in flow_implemented.steps:
-        agent_name = step.agent.name
-        call_fun = team_instance[agent_name].acall(step.description, tools = [], output_schema = step.output_schema, thoughts_schema = ThoughtsSchema, max_loop_count = 10, return_metadata = True)
-        # FIXME: need to change step.output_schema to an actual instantiated schema type
-        response, metadata = await call_fun
-
-
-            # response = await agent.aask(step.input_schema, step.output_schema)
-            # with open(f'{step.name}.json', 'w') as f:
-                # json.dump(json.loads(response.json()), f, ensure_ascii = False, indent=4)
-            # print(response)
-    # team_outline = await assistant.acall(query, tools = [], output_schema=TeamOutline, thoughts_schema=ThoughtsSchema, max_loop_count = 10)
-    # flow_outline = await assistant.acall(team_outline, tools = [], output_schema=FlowOutline, thoughts_schema=ThoughtsSchema, max_loop_count = 10)
-    return flow_outline
+    return flow_implemented
 
 
 
@@ -182,11 +160,38 @@ def get_extensions():
     ]
 
 
+async def run_flow(execution_flow : FlowImplemented, team_outline : TeamOutline) -> str:
+    team_instance = {}
+    for agent in team_outline.agents:
+        agent_instance = Role(
+            name = agent.name,
+            instructions = f"{agent.instructions}",
+            model = "gpt-4-0125-preview",
+        )
+        team_instance[agent.name] = agent_instance
+    # async def execute_flow(implemented_fow : FlowImplemented):
+    flow_object = 'Initial request'
+    flow_objects = []
+    for step in flow_implemented.steps:
+        agent_name = step.agent.name
+        success = False
+        try:
+            schema_type = create_pydantic_model_from_schema(step.output_schema)
+        except Exception as e:
+            print(e)
+            res = await assistant.aask(f"Failed to instantiate schema from SchemaClassImplemented: {step.output_schema}. Please try generating again. Error was the following: {str(e)}", SchemaClassImplemented)
+            schema_type = create_pydantic_model_from_schema(res)
+        call_fun = team_instance[agent_name].acall([flow_object, step.description], tools = [], output_schema = schema_type, thoughts_schema = ThoughtsSchema, max_loop_count = 10, return_metadata = True)
+        response, metadata = await call_fun
+        flow_object = response
+        flow_objects.append(response)
 
 
 async def main():
     # team_outline = await run_extension("Design a team that will solve the following problem: `There are 3 animals in a room, 2 leave. How many are left?`")
-    team_outline = await run_extension("Design a team that will solve the following problem: `I have a PDF file of a scientific paper. I want to understand and reproduce the results from the paper.`")
+    execution_flow, team_outline = await run_extension("Design a team that will solve the following problem: `I have a PDF file of a scientific paper. I want to understand and reproduce the results from the paper.`")
+    run_result = await run_flow(execution_flow)
+    print(run_result)
     #######################################################
     # Call acall on the agent instances
     #######################################################
