@@ -48,6 +48,7 @@ class SchemaActionOutline(BaseModel):
     """An action performed by an agent. An action takes either a string or a `SchemaClass` as input and returns a string or a `SchemaClass` as output"""
     name : str = Field(description = "The name of the action function")
     agent : SchemaAgentOutline = Field(description = "The agent who performs the action")
+    description : str = Field(description = "A detailed description of the action including what it does, how it does it, and what it returns. It should also include the input and output schema for the action.")
     input_schema : SchemaClassDraft = Field(description = "The input schema for the action")
     output_schema : SchemaClassDraft = Field(description = "The output schema for the action")
 
@@ -136,6 +137,7 @@ async def run_extension(query : str) -> TeamOutline:
         implemented_step = SchemaActionImplemented(
             name = step.name,
             agent = step.agent,
+            description = step.description,
             input_schema = implemented_schemas[step.input_schema.class_name],
             output_schema = implemented_schemas[step.output_schema.class_name]
         )
@@ -152,6 +154,18 @@ async def run_extension(query : str) -> TeamOutline:
             model = "gpt-4-0125-preview",
         )
         team_instance[agent.name] = agent_instance
+    # async def execute_flow(implemented_fow : FlowImplemented):
+    for step in flow_implemented.steps:
+        agent_name = step.agent.name
+        call_fun = team_instance[agent_name].acall(step.description, tools = [], output_schema = step.output_schema, thoughts_schema = ThoughtsSchema, max_loop_count = 10, return_metadata = True)
+        # FIXME: need to change step.output_schema to an actual instantiated schema type
+        response, metadata = await call_fun
+
+
+            # response = await agent.aask(step.input_schema, step.output_schema)
+            # with open(f'{step.name}.json', 'w') as f:
+                # json.dump(json.loads(response.json()), f, ensure_ascii = False, indent=4)
+            # print(response)
     # team_outline = await assistant.acall(query, tools = [], output_schema=TeamOutline, thoughts_schema=ThoughtsSchema, max_loop_count = 10)
     # flow_outline = await assistant.acall(team_outline, tools = [], output_schema=FlowOutline, thoughts_schema=ThoughtsSchema, max_loop_count = 10)
     return flow_outline
