@@ -25,29 +25,18 @@ async def aux_query(question, docs):
     answer = await docs.aquery(question)
     return answer.formatted_answer    
 
-async def run_extension(paper: Paper) -> str:
-
+async def ask_pdf_paper(location : str = Field(description="The location of the paper, either a file path or a url"),
+                        location_type : LocationType = Field(description="The type of file location it MUST be either 'file' or 'url'"),
+                        question :  str = Field(description="The question to ask about the paper")) -> str:
+    """Query a paper for information"""
     docs = Docs()
-    if paper.location_type == LocationType.file:
-        await docs.aadd(paper.location)
-        # docs.add(paper.location)
-    elif paper.location_type == LocationType.url:
-        await docs.add_url(paper.location)
-        # docs.add_url(paper.location)
+    if location_type == LocationType.file:
+        await docs.aadd(location)
+    elif location_type == LocationType.url:
+        await docs.add_url(location)
     else:
-        raise ValueError(f"Invalid location type: {paper.location_type}")
-    
-    # questions = [
-    #     "What are the key topics of the paper?",
-    #     "Does the paper involve informatic, computational, or data analysis that involves coding?",
-    #     "What are the key findings of the paper?",
-    #     "What methods were used in the paper?"
-    # ]
-    # answers = [f"Question {i} :\n{q}\n\nAnswer:\n{await aux_query(q, docs)}" for i, q in enumerate(questions)]
-    # with open(os.devnull, 'w') as devnull:
-            # print(answers, file=devnull)
-    # return "\n------------------------\n".join(answers)
-    answer = await aux_query(paper.question, docs)
+        raise ValueError(f"Invalid location type: {location_type}")
+    answer = await aux_query(question, docs)
     with open(os.devnull, 'w') as devnull:
         print(answer, file=devnull)
     return answer

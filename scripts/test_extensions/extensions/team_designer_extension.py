@@ -1,3 +1,5 @@
+from enum import Enum
+import inspect
 from schema_agents.provider.openai_api import retry
 import asyncio
 from paperqa import Docs
@@ -7,8 +9,7 @@ from bioimageio_chatbot.utils import ChatbotExtension
 import asyncio
 from schema_agents.role import Role, Message
 import json
-
-
+from .paperqa_tool import ask_pdf_paper
 
 
 class ThoughtsSchema(BaseModel):
@@ -44,6 +45,23 @@ class SchemaClassImplemented(SchemaClassDraft):
     """Represents a PyDantic model (extending PyDantic's BaseModel) for a class that will either be passed into an action or returned from an action"""
     fields : list[SchemaField] = Field(description = "The fields of the class. You MUST populate this list, it cannot be empty. Each field has a name, a type, and a description.")
 
+
+def expose_tool(function):
+    name = function.__name__
+    signature = inspect.signature(function)
+    docstring = function.__doc__
+    info = f"Tool Name: `{name}`\n\nTool Usage: {docstring}"
+    return info
+
+TOOLS = [ask_pdf_paper]
+TOOL_DICT = {tool.__name__ : tool for tool in TOOLS}
+
+# # Create an enum for listing out tools
+# class ToolTup(Enum):
+#     """The name of the tool"""
+#     ask_pdf_paper = ("ask_pdf_paper", """Query a paper for information""")
+
+
 class SchemaActionOutline(BaseModel):
     """An action performed by an agent. An action takes either a string or a `SchemaClass` as input and returns a string or a `SchemaClass` as output"""
     name : str = Field(description = "The name of the action function")
@@ -51,6 +69,13 @@ class SchemaActionOutline(BaseModel):
     description : str = Field(description = "A detailed description of the action including what it does, how it does it, and what it returns. It should also include the input and output schema for the action.")
     input_schema : SchemaClassDraft = Field(description = "The input schema for the action")
     output_schema : SchemaClassDraft = Field(description = "The output schema for the action")
+    tools : Optional[list[str]] = Field(description = f"The tools used in service of performing the action. You may use some, none, or all the available tools. If you choose to use tools, you MUST only choose from the available tools by name. The available tools are listed here: \n\n `{[expose_tool(x) for x in TOOLS]}`")
+
+    @validator('tools', each_item = True)
+    def check_tool_is_valid(cls, v):
+        if v not in [x.__name__ for x in TOOLS]:
+            raise ValueError(f"Tool `{v}` is not a valid tool name. Either pick an empty list or choose from the available tools listed here:\n`{[expose_tool(x) for x in TOOLS]}`")
+        return v
 
 class SchemaActionImplemented(SchemaActionOutline):
     """An action performed by an agent. An action takes either a string or a `SchemaClass` as input and returns a string or a `SchemaClass` as output"""
@@ -101,7 +126,7 @@ async def make_flow(team_outline: TeamOutline, role: Role = None) -> FlowOutline
     response = await role.aask(team_outline, FlowOutline)
     return(response)
 
-@retry(5)
+# @retry(5)
 async def run_extension(query : str) -> TeamOutline:
     """Take the input task and design a team of autonomous agents that will carry out the task according to the user's needs"""
     assistant = Role(
@@ -116,6 +141,7 @@ async def run_extension(query : str) -> TeamOutline:
         json.dump(json.loads(team_outline.json()), f, ensure_ascii = False, indent=4)
     print(team_outline)
     flow_outline = await assistant.aask(team_outline, FlowOutline)
+    # flow_outline = await assistant._run_action(make_flow, Message(content = "Design a flow", data = team_outline))
     with open('flow.json', 'w') as f:
         json.dump(json.loads(flow_outline.json()), f, ensure_ascii = False, indent=4)
 
@@ -136,15 +162,14 @@ async def run_extension(query : str) -> TeamOutline:
             agent = step.agent,
             description = step.description,
             input_schema = implemented_schemas[step.input_schema.class_name],
-            output_schema = implemented_schemas[step.output_schema.class_name]
+            output_schema = implemented_schemas[step.output_schema.class_name],
+            tools = [TOOL_DICT[t] for t in step.tools] if step.tools else [],
         )
         implemented_steps.append(implemented_step)
     flow_implemented = FlowImplemented(steps = implemented_steps)
     with open('flow_implemented.json', 'w') as f:
         json.dump(json.loads(flow_implemented.json()), f, ensure_ascii = False, indent=4)
     return flow_implemented, team_outline
-
-
 
 def get_extensions():
     return [
@@ -202,6 +227,10 @@ async def run_flow(execution_flow : FlowImplemented, team_outline : TeamOutline)
 
 
 async def main():
+    print('DEBUGGING PRINT: \n')
+    print(f"{[x for x in TOOLS]}")
+    print(f"{[expose_tool(x) for x in TOOLS]}")
+    print("-------------------")
     # team_outline = await run_extension("Design a team that will solve the following problem: `There are 3 animals in a room, 2 leave. How many are left?`")
     execution_flow, team_outline = await run_extension("Design a team that will solve the following problem: `I have a PDF file of a scientific paper located at /Users/gkreder/gdrive/exponential-chain/GSE254364/405.pdf. I want to understand and reproduce the results from the paper.`")
     run_result = await run_flow(execution_flow, team_outline)
