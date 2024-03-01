@@ -3,7 +3,7 @@ import inspect
 from schema_agents.provider.openai_api import retry
 import asyncio
 from paperqa import Docs
-from typing import List, Optional, Union, Type, Any, get_type_hints, Tuple
+from typing import List, Optional, Union, Type, Any, get_type_hints, Tuple, Literal
 from pydantic import BaseModel, Field, validator, create_model
 from bioimageio_chatbot.utils import ChatbotExtension
 import asyncio
@@ -25,6 +25,7 @@ class TeamOutline(BaseModel):
     """An outline for a team of agents to accomplish a given task"""
     name: str = Field(description="The name of the team")
     profile: str = Field(description="The profile of the team.")
+    original_query : str = Field(description="The original query that the team is designed to solve")
     goal: str = Field(description="The goal for the team")
     agents: list[SchemaAgentOutline] = Field(description = "The agents involved in the task")
 
@@ -53,19 +54,22 @@ def expose_tool(function):
     info = f"Tool Name: `{name}`\n\nTool Usage: {docstring}"
     return info
 
-TOOLS = [ask_pdf_paper]
-TOOL_DICT = {tool.__name__ : tool for tool in TOOLS}
-TOOL_DESC = '\n----------\n'.join([expose_tool(x) for x in TOOLS])
+# TOOLS = [ask_pdf_paper]
+# TOOL_DICT = {tool.__name__ : tool for tool in TOOLS}
+# TOOL_DESC = '\n----------\n'.join([expose_tool(x) for x in TOOLS])
 
 # # Create an enum for listing out tools
 # class ToolTup(Enum):
 #     """The name of the tool"""
 #     ask_pdf_paper = ("ask_pdf_paper", """Query a paper for information""")
 
-class AgentTool(Enum):
-    """A tool used by an agent to accomplish a given task. Each tool is presented as a string of the form `STRING_NAME : STRING_DESCRIPTION`. For example, `ask_pdf_paper : Query a paper for information` is a tool called `ask_pdf_paper` that queries a paper for information."""
-    ask_pdf_paper = 'ask_pdf_paper : Query a paper for information'
-    get_cwd = 'os.getcwd() : Get the current working directory'
+
+
+# class AskPDF(BaseModel):
+    # """A tool used by an agent to accomplish tasks involving extracting information from PDFs of scientific papers"""
+    # name : str = Field(description = "The name of the tool")
+    # description : str = Field(description = "A detailed description of the tool and its usage")
+
 
 # class AgentToolChoice(BaseModel):
 #     """A tool used by an agent to accomplish a given task"""
@@ -78,19 +82,34 @@ class SchemaActionOutline(BaseModel):
     description : str = Field(description = "A detailed description of the action including what it does, how it does it, and what it returns. It should also include the input and output schema for the action.")
     input_schema : SchemaClassDraft = Field(description = "The input schema for the action")
     output_schema : SchemaClassDraft = Field(description = "The output schema for the action")
-    tools : list[AgentTool] = Field(description = f"""The tools used in service of performing the action.""")
 
-    # @validator('tools', each_item = True)
-    # def check_tool_is_valid(cls, v):
-    #     if v not in [x.__name__ for x in TOOLS]:
-    #         raise ValueError(f"Tool `{v}` is not a valid tool name. Either pick an empty list or choose one or more from the available tools: {[x.__name__ for x in TOOLS]}. A full description of these tools is listed below:\n`{TOOL_DESC}`")
-    #     return v
+# class AgentTool(Enum):
+    # """A tool used by an agent to accomplish a given task. Each tool is presented as a string of the form `TOOL_NAME : TOOL_DESCRIPTION`. For example, `ask_pdf_paper : Query a paper for information` is a tool called `ask_pdf_paper` that queries a paper for information."""
+    # ask_pdf_paper = 'ask_pdf_paper : Query a paper for information'
 
+class AgentTool(BaseModel):
+    """A tool used by an agent to accomplish a given task"""
+    pass
+class AskPDF(AgentTool):
+    """A tool used by an agent to accomplish tasks involving extracting information from PDFs of scientific papers"""
+    pass
+
+class TestTool(AgentTool):
+    """A useless tool that isn't used by any agent to accomplish any task"""
+    pass 
+
+TOOL_DICT = {AskPDF : ask_pdf_paper,
+             TestTool : print}
+
+class ToolChoices(BaseModel):
+    """A choice of tools used by an agent to accomplish a given action"""
+    choices : list[Union[AskPDF, TestTool]] = Field(description = "The choice of tools used by the agent to accomplish the task. ONLY choose tools that might be helpful for the given task beyond the agent's base LLM capabilities. If no extra tools are needed, this is simply an empty list `[]`.")
 
 class SchemaActionImplemented(SchemaActionOutline):
     """An action performed by an agent. An action takes either a string or a `SchemaClass` as input and returns a string or a `SchemaClass` as output"""
     input_schema : SchemaClassImplemented = Field(description = "The input schema for the action")
     output_schema : SchemaClassImplemented = Field(description = "The output schema for the action")
+    tools : Optional[list[AgentTool]] = Field(None, description = "The choice of tools used by the agent to accomplish the task. If no tools besides a base LLM are needed, this is simply an empty list `[]`")
     
 class FlowOutline(BaseModel):
     """An outline for a flow of actions to accomplish a given task"""
@@ -129,6 +148,7 @@ def create_pydantic_model_from_schema(schema: SchemaClassImplemented) -> Type[Ba
 async def make_team_outline(task: str, role: Role = None) -> TeamOutline:
      """Take the input task and design a team of autonomous agents that will carry out the task according to the user's needs"""
      response = await role.aask(task, TeamOutline)
+     response.original_query = task
      return(response)
 
 @retry(3)
@@ -174,9 +194,13 @@ async def run_extension(query : str) -> TeamOutline:
             description = step.description,
             input_schema = implemented_schemas[step.input_schema.class_name],
             output_schema = implemented_schemas[step.output_schema.class_name],
-            tools = [t for t in step.tools] if step.tools else [],
         )
         implemented_steps.append(implemented_step)
+    tool_choices = await asyncio.gather(*[assistant.aask(sai, ToolChoices) for sai in implemented_steps])
+    tool_choices_flattened = [list({type(tool) : tool for tool in tools.choices}.values()) for tools in tool_choices]
+    tool_choices_fun = [[TOOL_DICT[type(tool)] for tool in tools] for tools in tool_choices_flattened]
+    for i_sai, sai in enumerate(implemented_steps):
+        sai.tools = tool_choices_fun[i_sai]
     flow_implemented = FlowImplemented(steps = implemented_steps)
     with open('flow_implemented.json', 'w') as f:
         json.dump(json.loads(flow_implemented.json()), f, ensure_ascii = False, indent=4)
@@ -225,7 +249,7 @@ async def run_flow(execution_flow : FlowImplemented, team_outline : TeamOutline)
         )
         team_instance[agent.name] = agent_instance
     # async def execute_flow(implemented_fow : FlowImplemented):
-    flow_object = 'Initial request'
+    flow_object = team_outline.original_query
     flow_objects = []
     for step in execution_flow.steps:
         agent_name = step.agent.name
@@ -238,10 +262,6 @@ async def run_flow(execution_flow : FlowImplemented, team_outline : TeamOutline)
 
 
 async def main():
-    print('DEBUGGING PRINT: \n')
-    print(f"{[x for x in TOOLS]}")
-    print(f"{[expose_tool(x) for x in TOOLS]}")
-    print("-------------------")
     # team_outline = await run_extension("Design a team that will solve the following problem: `There are 3 animals in a room, 2 leave. How many are left?`")
     execution_flow, team_outline = await run_extension("Design a team that will solve the following problem: `I have a PDF file of a scientific paper located at /Users/gkreder/gdrive/exponential-chain/GSE254364/405.pdf. I want to understand and reproduce the results from the paper.`")
     run_result = await run_flow(execution_flow, team_outline)
