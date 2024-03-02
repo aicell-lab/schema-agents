@@ -1,7 +1,6 @@
 """A simple demo for creating an agent for generating a recipe book based on user's query."""
 import asyncio
-from schema_agents.role import Role
-from schema_agents.schema import Message
+from schema_agents import Role, tool
 from pydantic import BaseModel, Field
 from typing import List
 
@@ -19,16 +18,6 @@ class CookBook(BaseModel):
     name: str = Field(description="The name of the recipe book.")
     recipes: List[Recipe] = Field(description="The list of recipes in the book.")
 
-
-async def respond_to_user(query: str, role: Role = None) -> CookBook:
-    """Respond to user's request by recipe book."""
-    # Use role.aask to make query to the agent and create typed outputs
-    # If you want the agent to choose one output type from a list of types, use typing.Union[type1, type2]
-    # If you want the agent to output one or many output types, use [type1, type2]
-    # Use role.acall to create parallel function calls by passing a list of functions, e.g.: role.acall(query, [tool1, tool2], output_schema)
-    response = await role.aask(query, CookBook)
-    return response
-    
     
 async def main():
     alice = Role(
@@ -36,14 +25,28 @@ async def main():
         profile="Cooker",
         goal="Your goal is to listen to user's request and propose recipes for making the most delicious meal for thanksgiving.",
         constraints=None,
-        actions=[respond_to_user],
+        register_default_events=True,
     )
-    event_bus = alice.get_event_bus()
-    event_bus.register_default_events()
-    responses = await alice.handle(Message(content="make something to surprise our guest from Stockholm.", role="User"))
-    print(responses)
+    
+    # Let's define a recipe book for Alice to use
+    recipies = await alice.aask("make something to surprise our guest from Stockholm.", CookBook)
+    print(recipies)
+    
+    # Let's define some tools for Alice to use
+    
+    @tool
+    def go_shopping(ingredients: List[str]) -> str:
+        """Go shopping for the ingredients."""
+        return "I have bought all the ingredients."
+    
+    @tool
+    def cook(recipe: Recipe) -> str:
+        """Cook the recipe."""
+        return f"I have cooked {recipe.name}."
+    
+    # Now let's call Alice to prepare a dinner for our guest
+    response = await alice.acall(["Let's prepare a dinner for our guest!", recipies], [go_shopping, cook])
+    print(response)
 
 if __name__ == "__main__":
-    loop = asyncio.get_event_loop()
-    loop.create_task(main())
-    loop.run_forever()
+    asyncio.run(main())
