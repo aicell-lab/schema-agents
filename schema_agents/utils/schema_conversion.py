@@ -1,41 +1,29 @@
 """Provide conversion functions for OpenAPI, JSON, and function schemas."""
 from pydantic import BaseModel, Field
+from pydantic.fields import FieldInfo
 from inspect import signature
 import inspect
 
-from openapi_schema_pydantic import OpenAPI
-from openapi_schema_pydantic.util import PydanticSchema, construct_open_api_with_schema_class
+from openapi_pydantic import OpenAPI
+from openapi_pydantic.util import PydanticSchema, construct_open_api_with_schema_class
 from pydantic import BaseModel, Field
 from schema_agents.utils import schema_to_function, dict_to_pydantic_model
 
-def extract_schemas(func, func_name=None):
-    assert callable(func), "Tools must be callable functions"
+def extract_tool_schemas(func, func_name=None):
+    assert callable(func), "Tool function must be callable functions"
     sig = signature(func)
-    # var_positional = [
-    #     p.name for p in sig.parameters.values() if p.kind == p.VAR_POSITIONAL
-    # ]
-    # kwargs_args = [
-    #     p.name for p in sig.parameters.values() if p.kind != p.VAR_POSITIONAL
-    # ]
     names = [p.name for p in sig.parameters.values()]
     for name in names:
-        assert sig.parameters[name].annotation != inspect._empty, f"Parameter {name} must have type annotation"
+        assert sig.parameters[name].annotation != inspect._empty, f"Argument `{name}` for `{func.__name__}` must have type annotation"
     types = [sig.parameters[name].annotation for name in names]
     defaults = []
-    for i, name in enumerate(names):
+    for name in names:
         if sig.parameters[name].default == inspect._empty:
-            # if types[i] is not pydantic base model
-            if not isinstance(types[i], type) or not issubclass(types[i], BaseModel):
-                defaults.append(Field(...))
-            else: 
-                defaults.append(Field(..., description=types[i].__doc__))
+            defaults.append(Field(..., description=name))
         else:
-            defaults.append(
-                Field(
-                    sig.parameters[name].default, description=types[i].__doc__
-                )
-            )
-    
+            assert isinstance(sig.parameters[name].default, FieldInfo), "Argument default must be a FieldInfo object with description"
+            assert sig.parameters[name].default.description is not None, f"Argument `{name}` for `{func.__name__}` must have a description"
+            defaults.append(sig.parameters[name].default)
     
     func_name = func_name or func.__name__
     return (
@@ -75,7 +63,7 @@ def get_primitive_schema(type_, is_json_schema=False):
 
 def create_function_openapi_schema(func, func_name=None, method="post"):
     func_name = func_name or func.__name__
-    input_schema, output_schema = extract_schemas(func, func_name=func_name)
+    input_schema, output_schema = extract_tool_schemas(func, func_name=func_name)
     output_schema_type = get_primitive_schema(output_schema, is_json_schema=False)
     return {
         method: {
@@ -97,7 +85,7 @@ def create_function_openapi_schema(func, func_name=None, method="post"):
 
 def create_function_json_schema(func, func_name=None):
     func_name = func_name or func.__name__
-    input_schema, output_schema = extract_schemas(func, func_name=func_name)
+    input_schema, output_schema = extract_tool_schemas(func, func_name=func_name)
     output_schema_type = get_primitive_schema(output_schema, is_json_schema=True)
     return input_schema.schema(), output_schema_type
 
@@ -149,6 +137,6 @@ def get_service_function_schema(service_config):
     function_schemas = []
 
     for path, func in functions.items():
-        input_schema, _ = extract_schemas(func, func_name=path)
+        input_schema, _ = extract_tool_schemas(func, func_name=path)
         function_schemas.append({"type": "function", "function": schema_to_function(input_schema)})
     return function_schemas

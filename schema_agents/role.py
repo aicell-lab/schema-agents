@@ -76,6 +76,7 @@ class Role:
         long_term_memory: Optional[LongTermMemory] = None,
         event_bus: EventBus = None,
         actions: list[Callable] = None,
+        register_default_events: bool = False,
         **kwargs,
     ):
         self._llm = LLM(**kwargs)
@@ -102,6 +103,9 @@ class Role:
             self.set_event_bus(
                 EventBus(f"{self._setting.profile} - {self._setting.name}")
             )
+        if register_default_events:
+            event_bus = self.get_event_bus()
+            event_bus.register_default_events()
         self._init_actions(self._actions)
 
     @property
@@ -479,6 +483,8 @@ class Role:
         prompt=None,
         extra_prompt=None,
     ):
+        for tool in tools:
+            assert hasattr(tool, '__is_tool__') and hasattr(tool, 'input_model'), f"Tool function `{tool.__name__}` must be decorated with `@tool`"
         output_schema = output_schema or str
         messages, _ = self._normalize_messages(req)
         _max_loop = 5

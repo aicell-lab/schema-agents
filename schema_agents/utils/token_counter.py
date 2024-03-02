@@ -92,7 +92,7 @@ def num_tokens_from_functions(functions, encoding):
                                 function_tokens += 3
                                 function_tokens += len(encoding.encode(o))
                         else:
-                            print(f"Warning: not supported field {field}")
+                            print(f"Warning (token count): not supported field {field}")
                 function_tokens += 11
 
         num_tokens += function_tokens
