@@ -12,9 +12,11 @@ from schema_agents.utils import schema_to_function, dict_to_pydantic_model
 def extract_tool_schemas(func, func_name=None):
     assert callable(func), "Tool function must be callable functions"
     sig = signature(func)
+    # handle partial functions
+    func_name = func.__name__ if hasattr(func, "__name__") else func.func.__name__ + "(partial)"
     names = [p.name for p in sig.parameters.values()]
     for name in names:
-        assert sig.parameters[name].annotation != inspect._empty, f"Argument `{name}` for `{func.__name__}` must have type annotation"
+        assert sig.parameters[name].annotation != inspect._empty, f"Argument `{name}` for `{func_name}` must have type annotation"
     types = [sig.parameters[name].annotation for name in names]
     defaults = []
     for name in names:
@@ -22,7 +24,7 @@ def extract_tool_schemas(func, func_name=None):
             defaults.append(Field(..., description=name))
         else:
             assert isinstance(sig.parameters[name].default, FieldInfo), "Argument default must be a FieldInfo object with description"
-            assert sig.parameters[name].default.description is not None, f"Argument `{name}` for `{func.__name__}` must have a description"
+            assert sig.parameters[name].default.description is not None, f"Argument `{name}` for `{func_name}` must have a description"
             defaults.append(sig.parameters[name].default)
     
     func_name = func_name or func.__name__
