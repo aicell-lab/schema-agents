@@ -1,7 +1,10 @@
 from schema_agents.utils.schema_conversion import extract_tool_schemas
 from functools import wraps
 from typing import get_args, get_origin, Union
-from pydantic_core import PydanticUndefined
+try:
+    from pydantic_core import PydanticUndefined
+except ImportError:
+    from pydantic.fields import Undefined as PydanticUndefined
 
 def tool(tool_func):
     """Decorator for tool functions."""
