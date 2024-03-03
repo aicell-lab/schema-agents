@@ -4,6 +4,9 @@ from pydantic.fields import FieldInfo
 from inspect import signature
 import inspect
 
+from typing import get_origin, get_args, Union, Any
+
+
 from openapi_pydantic import OpenAPI
 from openapi_pydantic.util import PydanticSchema, construct_open_api_with_schema_class
 from pydantic import BaseModel, Field
@@ -39,7 +42,7 @@ def extract_tool_schemas(func, func_name=None):
 
 
 def get_primitive_schema(type_, is_json_schema=False):
-    """Maps Python types to OpenAPI schema types."""
+    """Maps Python types to JSON schema and OpenAPI schema types."""
     if type_ is str:
         return {"type": "string"}
     elif type_ is int:
@@ -48,20 +51,48 @@ def get_primitive_schema(type_, is_json_schema=False):
         return {"type": "number"}
     elif type_ is bool:
         return {"type": "boolean"}
+    elif type_ is Any or type_ == inspect._empty:
+        return {}
     elif is_json_schema:
-        if type_ is inspect._empty:
+        # For converting to json schema
+        if type_ is None:
             return {"type": "null"}
         elif inspect.isclass(type_) and issubclass(type_, BaseModel):
-            return type_.schema()
+            return type_.model_json_schema()
         else:
-            raise ValueError(f"Unsupported type: {type_}")
+            origin = get_origin(type_)
+            if origin is list:
+                return {"type": "array", "items": get_primitive_schema(get_args(type_)[0], is_json_schema)}
+            elif origin is dict:
+                return {"type": "object", "additionalProperties": get_primitive_schema(get_args(type_)[1], is_json_schema)}
+            elif origin is Union:
+                types = get_args(type_)
+                if len(types) == 2 and types[1] is type(None):
+                    return {"type": get_primitive_schema(types[0], is_json_schema), "null": True}
+                else:
+                    return {"anyOf": [get_primitive_schema(t, is_json_schema) for t in types]}
+            else:
+                raise ValueError(f"Unsupported type: {type_}")
     else:
-        if type_ is inspect._empty:
-            return {}
+        # For converting to openapi schema
+        if type_ is None:
+            return {"nullable": True}
         elif inspect.isclass(type_) and issubclass(type_, BaseModel):
             return PydanticSchema(schema_class=type_)
         else:
-            raise ValueError(f"Unsupported type: {type_}")
+            origin = get_origin(type_)
+            if origin is list:
+                return {"type": "array", "items": get_primitive_schema(get_args(type_)[0], is_json_schema)}
+            elif origin is dict:
+                return {"type": "object", "additionalProperties": get_primitive_schema(get_args(type_)[1], is_json_schema)}
+            elif origin is Union:
+                types = get_args(type_)
+                if len(types) == 2 and types[1] is type(None):
+                    return {"type": get_primitive_schema(types[0], is_json_schema), "nullable": True}
+                else:
+                    return {"anyOf": [get_primitive_schema(t, is_json_schema) for t in types]}
+            else:
+                raise ValueError(f"Unsupported type: {type_}")
 
 def create_function_openapi_schema(func, func_name=None, method="post"):
     func_name = func_name or func.__name__
@@ -118,7 +149,7 @@ def get_service_openapi_schema(service_config, service_url="/"):
     open_api = construct_open_api_with_schema_class(open_api)
 
     # Return the generated OpenAPI schema in JSON format
-    return open_api.dict(by_alias=True, exclude_none=True)
+    return open_api.model_dump(by_alias=True, exclude_none=True)
 
 
 def get_service_json_schema(service_config):
