@@ -481,7 +481,7 @@ class Role:
         max_loop_count=10,
         return_metadata=False,
         prompt=None,
-        extra_prompt=None,
+        tool_usage_prompt=None,
     ):
         for tool in tools:
             assert hasattr(tool, '__is_tool__') and hasattr(tool, 'input_model'), f"Tool function `{tool.__name__}` must be decorated with `@tool`"
@@ -603,28 +603,25 @@ class Role:
         # fix_doc = lambda doc: doc.replace("\n", ";")[:100]
         # tool_entry = lambda s: f" - {s.__name__}: {fix_doc(s.__doc__)}"
         internal_tool_names = [s.__name__ for s in internal_tools]
+        get_doc = lambda s: s.__doc__.replace('\n', ';')[:100]
         tool_schema_names = "\n".join(
             [
-                f" - {s.__name__}"
+                f" - {s.__name__}: {get_doc(s)}"
                 for s in tool_inputs_models
                 if s not in internal_tool_names
             ]
         )
-        tool_prompt = (
-            "Address the user's query exclusively through the `CompleteUserQuery` tool for final responses. Utilize listed tools for specific tasks or `StartNewPlan` for planning complex tasks:\n"
-            f"{tool_schema_names}\n"
-            "Directly use `CompleteUserQuery` for straightforward queries. For more complex inquiries, integrate additional tools or create a strategic plan with `StartNewPlan`, adhering to this approach unless significant updates are necessary. Compile all insights into one final summary via `CompleteUserQuery`. Text responses generated during the process will serve as comments in the loop history and will not be shown to users. "
+        tool_usage_prompt = tool_usage_prompt or f"Utilize listed tools for specific tasks: {tool_schema_names}\n"
+        prompt = prompt or (
+            "Address the user's query exclusively through the `CompleteUserQuery` tool for final responses.\n"
+            f"{tool_usage_prompt}\n"
+            "Directly use `CompleteUserQuery` for straightforward queries. For more complex inquiries, create a strategic plan with `StartNewPlan` and then execute the plan, adhering to this approach unless significant updates are necessary. Compile all insights into one final summary via `CompleteUserQuery`. Text responses generated during the process will serve as comments in the loop history and will not be shown to users. "
             "Ensure loops are concise and within limits, keeping each action relevant to the original query. If the query is unresolved, outline your approach for internal review and, if required, seek further clarification. "
             "IMPORTANT: The only way to communicate a response to the user is by calling `CompleteUserQuery`. All text responses will be prefixed with `[Internal Comment]:`, contributing to the loop history but not visible to users."
         )
 
-        if extra_prompt:
-            tool_prompt += f"\n{extra_prompt}"
-            if prompt:
-                prompt += f"\n{extra_prompt}"
-
         messages.append(
-            {"role": "system", "content": prompt or tool_prompt}  # + loop_count_prompt,
+            {"role": "system", "content": prompt}  # + loop_count_prompt,
         )
 
         loop_count = 0
