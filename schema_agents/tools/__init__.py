@@ -1,5 +1,6 @@
 from schema_agents.utils.schema_conversion import extract_tool_schemas
 from functools import wraps
+import inspect
 from typing import get_args, get_origin, Union
 try:
     from pydantic_core import PydanticUndefined
@@ -31,7 +32,7 @@ def tool(tool_func):
                 required.append(name)
 
     @wraps(tool_func)
-    def wrapper(*args, **kwargs):
+    async def wrapper(*args, **kwargs):
         for req in required:
             assert req in kwargs, f"Tool function `{tool_func.__name__}` missing required argument `{req}`"
         for k in default_factories:
@@ -40,7 +41,10 @@ def tool(tool_func):
         for k in defaults:
             if k not in kwargs:
                 kwargs[k] = defaults[k]
-        return tool_func(*args, **kwargs)
+        ret = tool_func(*args, **kwargs)
+        if inspect.isawaitable(ret):
+            return await ret
+        return ret
 
     wrapper.input_model = input_schema
     wrapper.output_model= output_schema

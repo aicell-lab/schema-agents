@@ -308,7 +308,7 @@ class Role:
                         response, BaseModel
                     ), f"Action must return str or pydantic BaseModel, but got {response}"
                     output = Message(
-                        content=response.json(),
+                        content=response.model_dump_json(),
                         data=response,
                         session_history=msg.session_history.copy(),
                         role=self.profile,
@@ -337,7 +337,7 @@ class Role:
                 {
                     "role": "function",
                     "name": req.__class__.__name__,
-                    "content": req.json(),
+                    "content": req.model_dump_json(),
                 }
             ]
         else:
@@ -354,7 +354,7 @@ class Role:
                         {
                             "role": "function",
                             "name": r.__class__.__name__,
-                            "content": r.json(),
+                            "content": r.model_dump_json(),
                         }
                     )
                 else:
@@ -547,7 +547,9 @@ class Role:
                     loop = asyncio.get_running_loop()
 
                     def sync_func():
-                        return tool(*args, **kwargs)
+                        result = tool(*args, **kwargs)
+                        assert not inspect.isawaitable(result), f"Sync function {tool.__name__} returned an awaitable object. Use async function instead."
+                        return result
 
                     return await loop.run_in_executor(None, sync_func)
             except Exception as exp:
@@ -587,7 +589,7 @@ class Role:
                         "role": "tool",
                         "name": tools[idx].__name__,
                         "content": (
-                            result.json()
+                            result.model_dump_json()
                             if isinstance(result, BaseModel)
                             else str(result)
                         )
