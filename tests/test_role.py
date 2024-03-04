@@ -5,6 +5,7 @@ from typing import List, Optional, Union
 from pydantic import BaseModel, Field
 from schema_agents.role import Role
 from schema_agents.schema import Message
+from schema_agents import schema_tool
 import json
 
 
@@ -58,6 +59,23 @@ class FormDialogInfo(BaseModel):
     ui_schema: Optional[str] = Field(None, description="customized ui schema for rendering the form, json string, no need to escape quotes, in yaml format")
     submit_label: Optional[str] = Field("Submit", description="Submit button label")
 
+
+@pytest.mark.asyncio
+async def test_tool_call_without_argument():
+    agent = Role(name="Alice",
+                profile="BioImage Analyst",
+                goal="A are a helpful agent",
+                constraints=None)
+
+    @schema_tool
+    async def say_hello(name: Optional[str]=Field("alice", description="Name")) -> str:
+        """Say hello."""
+        return f"Hello {name}"
+    
+    ret = await agent.acall("Call say_hello without passing name into the argument, just call it", [say_hello], str)
+    assert "alice" in ret 
+
+
 @pytest.mark.asyncio
 async def test_tool_call_text():
     bioimage_analyst = Role(
@@ -65,6 +83,7 @@ async def test_tool_call_text():
                 actions=[])
     bioimage_analyst.get_event_bus().register_default_events()
     
+    @schema_tool
     async def get_details(hint: str = Field(..., description="prompt to the user for requesting specific information")) -> str:
         """Get detailed request from the user."""
         print(hint)
@@ -89,6 +108,8 @@ async def test_tool_call_text():
 @pytest.mark.asyncio
 async def test_tool_call_retry():
     run_count = 0
+
+    @schema_tool
     async def get_extra_information(extra_info: str=Field(..., description="prompt to the user for requesting specific information")) -> UserInput:
         """Get Extra Information with hint to the user."""
         nonlocal run_count
@@ -117,12 +138,16 @@ async def test_tool_call_retry():
 async def test_tool_call():
     async def create_user_requirements(query: str, role: Role) -> SoftwareRequirementDocument:
         """Create user requirements."""
-        def create_sdr(sdr: SoftwareRequirementDocument) -> str:
+    
+        @schema_tool
+        def create_sdr(sdr: SoftwareRequirementDocument=Field(..., description="software requirement document")) -> str:
             """Create Software Requirement Document."""
             return "SDR"
 
-        async def get_extra_information(extra_info: GetExtraInformation, hint: str) -> UserInput:
+        @schema_tool
+        async def get_extra_information(extra_info: GetExtraInformation=Field(..., description="extra information"), hint: str=Field(..., description="hint to the user")) -> UserInput:
             """Get Extra Information with hint to the user."""
+            print(hint)
             return await get_user_input(extra_info)
 
         response = await role.acall(query, [create_sdr, get_extra_information], SoftwareRequirementDocument)

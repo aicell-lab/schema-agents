@@ -1,41 +1,34 @@
 """Provide conversion functions for OpenAPI, JSON, and function schemas."""
 from pydantic import BaseModel, Field
+from pydantic.fields import FieldInfo
 from inspect import signature
 import inspect
 
-from openapi_schema_pydantic import OpenAPI
-from openapi_schema_pydantic.util import PydanticSchema, construct_open_api_with_schema_class
+from typing import get_origin, get_args, Union, Any
+
+
+from openapi_pydantic import OpenAPI
+from openapi_pydantic.util import PydanticSchema, construct_open_api_with_schema_class
 from pydantic import BaseModel, Field
 from schema_agents.utils import schema_to_function, dict_to_pydantic_model
 
-def extract_schemas(func, func_name=None):
-    assert callable(func), "Tools must be callable functions"
+def extract_tool_schemas(func, func_name=None):
+    assert callable(func), "Tool function must be callable functions"
     sig = signature(func)
-    # var_positional = [
-    #     p.name for p in sig.parameters.values() if p.kind == p.VAR_POSITIONAL
-    # ]
-    # kwargs_args = [
-    #     p.name for p in sig.parameters.values() if p.kind != p.VAR_POSITIONAL
-    # ]
+    # handle partial functions
+    func_name = func.__name__ if hasattr(func, "__name__") else func.func.__name__ + "(partial)"
     names = [p.name for p in sig.parameters.values()]
     for name in names:
-        assert sig.parameters[name].annotation != inspect._empty, f"Parameter {name} must have type annotation"
+        assert sig.parameters[name].annotation != inspect._empty, f"Argument `{name}` for `{func_name}` must have type annotation"
     types = [sig.parameters[name].annotation for name in names]
     defaults = []
-    for i, name in enumerate(names):
+    for name in names:
         if sig.parameters[name].default == inspect._empty:
-            # if types[i] is not pydantic base model
-            if not isinstance(types[i], type) or not issubclass(types[i], BaseModel):
-                defaults.append(Field(...))
-            else: 
-                defaults.append(Field(..., description=types[i].__doc__))
+            defaults.append(Field(..., description=name))
         else:
-            defaults.append(
-                Field(
-                    sig.parameters[name].default, description=types[i].__doc__
-                )
-            )
-    
+            assert isinstance(sig.parameters[name].default, FieldInfo), "Argument default must be a FieldInfo object with description"
+            assert sig.parameters[name].default.description is not None, f"Argument `{name}` for `{func_name}` must have a description"
+            defaults.append(sig.parameters[name].default)
     
     func_name = func_name or func.__name__
     return (
@@ -49,7 +42,7 @@ def extract_schemas(func, func_name=None):
 
 
 def get_primitive_schema(type_, is_json_schema=False):
-    """Maps Python types to OpenAPI schema types."""
+    """Maps Python types to JSON schema and OpenAPI schema types."""
     if type_ is str:
         return {"type": "string"}
     elif type_ is int:
@@ -58,24 +51,52 @@ def get_primitive_schema(type_, is_json_schema=False):
         return {"type": "number"}
     elif type_ is bool:
         return {"type": "boolean"}
+    elif type_ is Any or type_ == inspect._empty:
+        return {}
     elif is_json_schema:
-        if type_ is inspect._empty:
+        # For converting to json schema
+        if type_ is None:
             return {"type": "null"}
         elif inspect.isclass(type_) and issubclass(type_, BaseModel):
-            return type_.schema()
+            return type_.model_json_schema()
         else:
-            raise ValueError(f"Unsupported type: {type_}")
+            origin = get_origin(type_)
+            if origin is list:
+                return {"type": "array", "items": get_primitive_schema(get_args(type_)[0], is_json_schema)}
+            elif origin is dict:
+                return {"type": "object", "additionalProperties": get_primitive_schema(get_args(type_)[1], is_json_schema)}
+            elif origin is Union:
+                types = get_args(type_)
+                if len(types) == 2 and types[1] is type(None):
+                    return {"type": get_primitive_schema(types[0], is_json_schema), "null": True}
+                else:
+                    return {"anyOf": [get_primitive_schema(t, is_json_schema) for t in types]}
+            else:
+                raise ValueError(f"Unsupported type: {type_}")
     else:
-        if type_ is inspect._empty:
-            return {}
+        # For converting to openapi schema
+        if type_ is None:
+            return {"nullable": True}
         elif inspect.isclass(type_) and issubclass(type_, BaseModel):
             return PydanticSchema(schema_class=type_)
         else:
-            raise ValueError(f"Unsupported type: {type_}")
+            origin = get_origin(type_)
+            if origin is list:
+                return {"type": "array", "items": get_primitive_schema(get_args(type_)[0], is_json_schema)}
+            elif origin is dict:
+                return {"type": "object", "additionalProperties": get_primitive_schema(get_args(type_)[1], is_json_schema)}
+            elif origin is Union:
+                types = get_args(type_)
+                if len(types) == 2 and types[1] is type(None):
+                    return {"type": get_primitive_schema(types[0], is_json_schema), "nullable": True}
+                else:
+                    return {"anyOf": [get_primitive_schema(t, is_json_schema) for t in types]}
+            else:
+                raise ValueError(f"Unsupported type: {type_}")
 
 def create_function_openapi_schema(func, func_name=None, method="post"):
     func_name = func_name or func.__name__
-    input_schema, output_schema = extract_schemas(func, func_name=func_name)
+    input_schema, output_schema = extract_tool_schemas(func, func_name=func_name)
     output_schema_type = get_primitive_schema(output_schema, is_json_schema=False)
     return {
         method: {
@@ -97,7 +118,7 @@ def create_function_openapi_schema(func, func_name=None, method="post"):
 
 def create_function_json_schema(func, func_name=None):
     func_name = func_name or func.__name__
-    input_schema, output_schema = extract_schemas(func, func_name=func_name)
+    input_schema, output_schema = extract_tool_schemas(func, func_name=func_name)
     output_schema_type = get_primitive_schema(output_schema, is_json_schema=True)
     return input_schema.schema(), output_schema_type
 
@@ -120,7 +141,7 @@ def get_service_openapi_schema(service_config, service_url="/"):
     for path, func in functions.items():
         paths[f"/{path}"] = create_function_openapi_schema(func, func_name=path.replace(".", "_"))
     
-    open_api = OpenAPI.parse_obj({
+    open_api = OpenAPI.model_validate({
         "info": {"title": service_config['name'], "version": "v0.1.0"},
         "servers": [{"url": service_url or "/"}],
         "paths": paths,
@@ -128,7 +149,7 @@ def get_service_openapi_schema(service_config, service_url="/"):
     open_api = construct_open_api_with_schema_class(open_api)
 
     # Return the generated OpenAPI schema in JSON format
-    return open_api.dict(by_alias=True, exclude_none=True)
+    return open_api.model_dump(by_alias=True, exclude_none=True)
 
 
 def get_service_json_schema(service_config):
@@ -149,6 +170,6 @@ def get_service_function_schema(service_config):
     function_schemas = []
 
     for path, func in functions.items():
-        input_schema, _ = extract_schemas(func, func_name=path)
+        input_schema, _ = extract_tool_schemas(func, func_name=path)
         function_schemas.append({"type": "function", "function": schema_to_function(input_schema)})
     return function_schemas
