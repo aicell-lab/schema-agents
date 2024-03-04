@@ -435,7 +435,7 @@ class Role:
             for t in types:
                 if inspect.isclass(t) and issubclass(t, BaseModel):
                     t.__name__ = t.__name__ + "_IN"  # avoid name conflict
-                    t.update_forward_refs()
+                    t.model_rebuild()
 
             defaults = []
             for i, name in enumerate(names):
@@ -467,7 +467,7 @@ class Role:
                 tool_args,
                 tool.__doc__,
             )
-            model.update_forward_refs()
+            model.model_rebuild()
             tool_inputs_models.append(model)
 
         return arg_names, tool_inputs_models
