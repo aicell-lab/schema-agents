@@ -11,3 +11,4 @@ tenacity==8.2.3
 langchain==0.0.314
 pykernel==0.1.6
 openapi-pydantic==0.4.0
+makefun==1.15.2
