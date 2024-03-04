@@ -5,7 +5,7 @@ from typing import List, Optional, Union
 from pydantic import BaseModel, Field
 from schema_agents.role import Role
 from schema_agents.schema import Message
-from schema_agents import tool
+from schema_agents import schema_tool
 import json
 
 
@@ -67,7 +67,7 @@ async def test_tool_call_without_argument():
                 goal="A are a helpful agent",
                 constraints=None)
 
-    @tool
+    @schema_tool
     async def say_hello(name: Optional[str]=Field("alice", description="Name")) -> str:
         """Say hello."""
         return f"Hello {name}"
@@ -83,7 +83,7 @@ async def test_tool_call_text():
                 actions=[])
     bioimage_analyst.get_event_bus().register_default_events()
     
-    @tool
+    @schema_tool
     async def get_details(hint: str = Field(..., description="prompt to the user for requesting specific information")) -> str:
         """Get detailed request from the user."""
         print(hint)
@@ -109,7 +109,7 @@ async def test_tool_call_text():
 async def test_tool_call_retry():
     run_count = 0
 
-    @tool
+    @schema_tool
     async def get_extra_information(extra_info: str=Field(..., description="prompt to the user for requesting specific information")) -> UserInput:
         """Get Extra Information with hint to the user."""
         nonlocal run_count
@@ -139,12 +139,12 @@ async def test_tool_call():
     async def create_user_requirements(query: str, role: Role) -> SoftwareRequirementDocument:
         """Create user requirements."""
     
-        @tool
+        @schema_tool
         def create_sdr(sdr: SoftwareRequirementDocument=Field(..., description="software requirement document")) -> str:
             """Create Software Requirement Document."""
             return "SDR"
 
-        @tool
+        @schema_tool
         async def get_extra_information(extra_info: GetExtraInformation=Field(..., description="extra information"), hint: str=Field(..., description="hint to the user")) -> UserInput:
             """Get Extra Information with hint to the user."""
             print(hint)
