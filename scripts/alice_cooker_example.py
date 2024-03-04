@@ -1,6 +1,6 @@
 """A simple demo for creating an agent for generating a recipe book based on user's query."""
 import asyncio
-from schema_agents import Role, tool
+from schema_agents import Role, schema_tool
 from pydantic import BaseModel, Field
 from typing import List
 
@@ -34,12 +34,12 @@ async def main():
     
     # Let's define some tools for Alice to use
     
-    @tool
+    @schema_tool
     def go_shopping(ingredients: List[str]) -> str:
         """Go shopping for the ingredients."""
         return "I have bought all the ingredients."
     
-    @tool
+    @schema_tool
     def cook(recipe: Recipe) -> str:
         """Cook the recipe."""
         return f"I have cooked {recipe.name}."

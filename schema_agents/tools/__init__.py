@@ -7,7 +7,7 @@ try:
 except ImportError:
     from pydantic.fields import Undefined as PydanticUndefined
 
-def tool(tool_func):
+def schema_tool(tool_func):
     """Decorator for tool functions."""
     assert callable(tool_func)
     assert tool_func.__doc__ is not None
