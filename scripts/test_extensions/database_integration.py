@@ -33,7 +33,8 @@ async def main():
     # query = "What is the official gene symbol of LMP10?"
     # query = "Tell me all the proteins associated with muscular dystrophy. Keep using the NCBI Web APIs until you get a final list. Use the write_to_file and read_file tools to store and retrieve intermediate results."
     # query = "Please find a paper associated with muscular dystrophy whose full text is available on PubMed. Then write the content of that article to a local text file."
-    query = "Who are some authors who have written lots of articles recently about synthetic biology?"
+    # query = "Who are some authors who have written lots of articles recently about synthetic biology?"
+    query = "Give me a non-redundant list of genes associated with 'Malignant breast neoplasm'"
 
     response, metadata = await manager.acall(query,
                                 #    [ask_pdf_paper, search_web],
