@@ -8,6 +8,7 @@ import asyncio
 from schema_agents.role import Message
 from schema_agents import schema_tool, Role
 from pydantic import BaseModel, Field
+from graph_adder import plot_metdata
 
 from tools.NCBI import get_geo_api_info, get_genomic_api_info, ncbi_api_call, get_pubmed_api_info
 from tools.fileIO import write_to_file, read_file
@@ -43,6 +44,7 @@ async def main():
                                    max_loop_count = 10,
                                    thoughts_schema=ThoughtsSchema,
                                    )
+    plot_metdata(metadata)
     print(response)
 
 if __name__ == "__main__":
