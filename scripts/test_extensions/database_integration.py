@@ -8,10 +8,10 @@ import asyncio
 from schema_agents.role import Message
 from schema_agents import schema_tool, Role
 from pydantic import BaseModel, Field
-from graph_adder import plot_metdata
+from .graph_adder import plot_metdata
 
-from tools.NCBI import get_geo_api_info, get_genomic_api_info, ncbi_api_call, get_pubmed_api_info
-from tools.fileIO import write_to_file, read_file
+from .tools.NCBI import get_geo_api_info, get_genomic_api_info, ncbi_api_call, get_pubmed_api_info
+from .tools.fileIO import write_to_file, read_file
 tools = [get_geo_api_info, get_genomic_api_info, ncbi_api_call, write_to_file, read_file, get_pubmed_api_info]
 
 class ThoughtsSchema(BaseModel):
@@ -35,7 +35,8 @@ async def main():
     # query = "Tell me all the proteins associated with muscular dystrophy. Keep using the NCBI Web APIs until you get a final list. Use the write_to_file and read_file tools to store and retrieve intermediate results."
     # query = "Please find a paper associated with muscular dystrophy whose full text is available on PubMed. Then write the content of that article to a local text file."
     # query = "Who are some authors who have written lots of articles recently about synthetic biology?"
-    query = "Give me a non-redundant list of genes associated with 'Malignant breast neoplasm'"
+    # query = "Give me a non-redundant list of genes associated with 'Malignant breast neoplasm'"
+    query = """Answer the following question. Do thorough research then answer yes/no/maybe and give justification: 'Does repeated hyperbaric exposure to 4 atmosphere absolute cause hearing impairment?' If you are 70 percent certain of an answer (yes/no) give that as your final answer."""
 
     response, metadata = await manager.acall(query,
                                 #    [ask_pdf_paper, search_web],
@@ -44,7 +45,7 @@ async def main():
                                    max_loop_count = 10,
                                    thoughts_schema=ThoughtsSchema,
                                    )
-    plot_metdata(metadata)
+    # plot_metdata(metadata)
     print(response)
 
 if __name__ == "__main__":

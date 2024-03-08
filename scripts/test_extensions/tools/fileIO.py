@@ -14,3 +14,4 @@ async def read_file(string : str = Field(description="The file to read from")) -
     """Read a file and return the string"""
     with open(string, 'r') as f:
         return f.read()
+    
