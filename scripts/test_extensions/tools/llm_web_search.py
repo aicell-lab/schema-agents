@@ -4,16 +4,24 @@ from langchain.schema import Document
 
 from .langchain_websearch import LangchainCompressor
 from pydantic import Field
+from langchain_community.retrievers import BM25Retriever, EnsembleRetriever
+from langchain_openai import OpenAIEmbeddings
 
-async def query_pubmed_paper(pubmed_query_url: str = Field(description = "A url that uses the NCBI eutils web API to query PubMed"), langchain_compressor: LangchainCompressor,
-                                max_results: int, similarity_threshold: float, instant_answers: bool,
-                                chunk_size: int, num_results_to_process: int):
-    from .NCBI import ncbi_api_call
+async def query_pubmed_paper(query : str = Field(description = "A query to run on returned PubMed paper"), 
+                             pubmed_query_url: str = Field(description = "A url that uses the NCBI eutils web API to query PubMed")):
+    from .NCBI import ncbi_api_call, call_api
     documents = []
-    query = query.strip("\"'")
-    pubmed_response = ncbi_api_call(pubmed_query_url).decode()
-    
+    pubmed_response = call_api(pubmed_query_url).decode()
+    documents.extend(pubmed_response)
+    bm25_retriever = BM25Retriever.from texts(documents, metadatas = [{"source" : 1}] * len(documents))
+    bm25_retriever.k = 5
+    embedding = OpenAIEmbeddings()
+    faiss_vectorstore = FAISS.from_texts(documents, embedding, metadatas = [{"source" : 1}] * len(documents))
+    faiss_retriever = faiss_vectorstore.as_retriever(search_kwargs = {"k" : 5})
 
+    ensemble_retriever = EnsembleRetriever([bm25_retriever, faiss_retriever], weidhts = [0.5, 0.5])
+    docs = ensemble_retriever.invoke("Authors")
+    return docs
 
 
 async def search_duckduckgo(query: str, langchain_compressor: LangchainCompressor,
