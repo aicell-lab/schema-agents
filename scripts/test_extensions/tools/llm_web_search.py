@@ -1,24 +1,21 @@
 import httpx
 from bs4 import BeautifulSoup
 from langchain.schema import Document
-
-from .langchain_websearch import LangchainCompressor
 from pydantic import Field
-from langchain_community.retrievers import BM25Retriever, EnsembleRetriever
+from langchain.retrievers import BM25Retriever, EnsembleRetriever
 from langchain_openai import OpenAIEmbeddings
+# from .langchain_websearch import LangchainCompressor
 
-async def query_pubmed_paper(query : str = Field(description = "A query to run on returned PubMed paper"), 
-                             pubmed_query_url: str = Field(description = "A url that uses the NCBI eutils web API to query PubMed")):
+def query_pubmed_paper(pubmed_query_url: str = Field(description = "A url that uses the NCBI eutils web API to query PubMed")):
     from .NCBI import ncbi_api_call, call_api
     documents = []
     pubmed_response = call_api(pubmed_query_url).decode()
     documents.extend(pubmed_response)
-    bm25_retriever = BM25Retriever.from texts(documents, metadatas = [{"source" : 1}] * len(documents))
+    bm25_retriever = BM25Retriever.from_texts(documents, metadatas = [{"source" : 1}] * len(documents))
     bm25_retriever.k = 5
     embedding = OpenAIEmbeddings()
     faiss_vectorstore = FAISS.from_texts(documents, embedding, metadatas = [{"source" : 1}] * len(documents))
     faiss_retriever = faiss_vectorstore.as_retriever(search_kwargs = {"k" : 5})
-
     ensemble_retriever = EnsembleRetriever([bm25_retriever, faiss_retriever], weidhts = [0.5, 0.5])
     docs = ensemble_retriever.invoke("Authors")
     return docs
