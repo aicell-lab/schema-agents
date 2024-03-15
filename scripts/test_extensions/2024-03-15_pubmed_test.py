@@ -10,8 +10,8 @@ from schema_agents import schema_tool, Role
 from pydantic import BaseModel, Field
 from .graph_adder import plot_metdata
 
-from .tools.NCBI import get_geo_api_info, get_genomic_api_info, ncbi_api_call, get_pubmed_api_info
-from .tools.fileIO import write_to_file, read_file
+from .tools.NCBI import get_geo_api_info, get_genomic_api_info, ncbi_api_call, get_pubmed_api_info, get_pubmed_central_oa
+from .tools.fileIO import write_to_file, read_file, ftp_download, unzip_tar_gz, list_files_in_dir
 from .tools.llm_web_search import search_pubmed_paper
 
 class ThoughtsSchema(BaseModel):
@@ -37,10 +37,11 @@ async def main():
     # query = "Who are some authors who have written lots of articles recently about synthetic biology?"
     # query = "Give me a non-redundant list of genes associated with 'Malignant breast neoplasm'"
     # query = """Answer the following question. Do thorough research then answer yes/no/maybe and give justification: 'Does repeated hyperbaric exposure to 4 atmosphere absolute cause hearing impairment?' If you are 70 percent certain of an answer (yes/no) give that as your final answer."""
-    query = "What specific methods were used in the paper with PubMed Central ID PMC1790863?"
+    # query = "What specific methods were used in the paper with PubMed Central ID PMC1790863?"
+    query = "Is the PubMed Central article with ID PMC1790863 open access? If so, download it, unzip it if necessary, and tell me the final path to the PDF"
 
     # tools = [get_geo_api_info, get_genomic_api_info, ncbi_api_call, write_to_file, read_file, get_pubmed_api_info]
-    tools = [search_pubmed_paper]
+    tools = [get_pubmed_central_oa, write_to_file, read_file, ftp_download, unzip_tar_gz, search_pubmed_paper, list_files_in_dir]
     response, metadata = await manager.acall(query,
                                 #    [ask_pdf_paper, search_web],
                                     tools,

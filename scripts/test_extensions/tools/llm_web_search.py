@@ -43,8 +43,7 @@ def pubmed_xml_to_text(pubmed_response : str):
 
 @schema_tool
 async def search_pubmed_paper(query : str = Field(description = "The query to run on the paper"),
-                        pmc_id : str = Field(description = "The PMC ID of the paper to query"),
-                        download_dir : str = Field(description = "The name of the local directory to download the paper text to"),
+                        pmc_id : str = Field(description = "The PMC ID of the paper to query in the correct format (e.g. PMC)"),
                         chunk_size : int = Field(description = "The chunk size to use when breaking up the paper text into smaller chunks for processing. Defaults to 500"),
                         num_results : int = Field(description = "The number of results to return. Defaults to 5"),
                         similarity_threshold : float = Field(description="The similarity threshold to use when filtering out query search results. Defaults to 0.5")) -> list[Document]:
@@ -53,9 +52,8 @@ async def search_pubmed_paper(query : str = Field(description = "The query to ru
 #                         similarity_threshold : float = 0.5):
     """Take a pubmed paper ID and run a query on it. The query is a plaintext string. The function returns the top `num_results` most relevant text chunks from the paper."""
     from .NCBI import call_api
-    os.makedirs(download_dir, exist_ok = True)
     documents = []
-    pmc_fname = os.path.join(download_dir, f"{pmc_id}.txt")
+    pmc_fname = f"{pmc_id}.txt"
     pubmed_query_url = f"https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=pmc&id={pmc_id}"
     if not os.path.exists(pmc_fname):
         pubmed_response = call_api(pubmed_query_url).decode()

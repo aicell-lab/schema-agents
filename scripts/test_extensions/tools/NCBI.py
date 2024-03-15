@@ -1,4 +1,5 @@
 import os
+import xml.etree.ElementTree as ET
 from enum import Enum
 import inspect
 from schema_agents.provider.openai_api import retry
@@ -132,3 +133,28 @@ async def ncbi_api_call(ncbi_query_url : str = Field(description = "A url that u
     """Use the NCBI Web API to work on tasks that are aided by use of the NCBI databases"""
     query_response = call_api(ncbi_query_url)
     return query_response
+
+
+
+@schema_tool
+async def get_pubmed_central_oa(pmc_id : str = Field(description="The Pubmed Central ID of the article to get e.g. PMC1790863")) -> str:
+    """Checks if the article with the given PubMed Central ID is open access. If it is, returns the ftp link for the article's contents. If it is not, returns a message indicating that the article is not open access."""
+    query_url = f"https://www.ncbi.nlm.nih.gov/pmc/utils/oa/oa.fcgi?id={pmc_id}"
+    xml_content = call_api(query_url).decode()
+    # Parse the XML content
+    root = ET.fromstring(xml_content)
+
+    # Check if the XML content contains <record> tags
+    records = root.findall('.//record')
+    if records:
+        # Find the <link> tags within and give the "href" of those links
+        links = [link.get('href') for record in records for link in record.findall('.//link')]
+        if len(links) == 1:
+            return f"The article is open access. Here's the only link I could find to download the article's resources:\n{links[0]}"
+        elif len(links) == 0:
+            return "The article is not open access."
+        else:
+            link_list_formatted = '\n'.join(links)
+            return f"The article is open access. I found multiple article resource FTP download links:\n{link_list_formatted}"
+    else:
+        return "The article is not open access."
