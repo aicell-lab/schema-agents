@@ -1,24 +1,86 @@
+from xml.etree import cElementTree as ET
+import os
 import httpx
 from bs4 import BeautifulSoup
 from langchain.schema import Document
 from pydantic import Field
-from langchain.retrievers import BM25Retriever, EnsembleRetriever
+from langchain.retrievers import EnsembleRetriever
+from langchain_community.retrievers import BM25Retriever
 from langchain_openai import OpenAIEmbeddings
-# from .langchain_websearch import LangchainCompressor
+from langchain_community.vectorstores import FAISS
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_community.document_transformers import EmbeddingsRedundantFilter
+from langchain.retrievers.document_compressors import DocumentCompressorPipeline
+from langchain.retrievers.ensemble import EnsembleRetriever
+from langchain.retrievers.document_compressors.embeddings_filter import EmbeddingsFilter
+from langchain.retrievers import ContextualCompressionRetriever
+from .langchain_websearch import LangchainCompressor
+from schema_agents import schema_tool, Role
+import re
 
-def query_pubmed_paper(pubmed_query_url: str = Field(description = "A url that uses the NCBI eutils web API to query PubMed")):
-    from .NCBI import ncbi_api_call, call_api
+def preprocess_text(text: str) -> str:
+    text = text.replace("\n", " \n")
+    spaces_regex = re.compile(r" {3,}")
+    text = spaces_regex.sub(" ", text)
+    text = text.strip()
+    return text
+
+def extract_text(element):
+    text = ""
+    if element.text:
+        text += element.text
+    for child in element:
+        text += extract_text(child)
+        if child.tail:
+            text += child.tail
+    return text
+
+def pubmed_xml_to_text(pubmed_response : str):
+    tree = ET.fromstring(pubmed_response)
+    article_body = tree.find(".//body")
+    article_text = extract_text(article_body).strip()
+    return article_text
+
+@schema_tool
+async def search_pubmed_paper(query : str = Field(description = "The query to run on the paper"),
+                        pmc_id : str = Field(description = "The PMC ID of the paper to query"),
+                        download_dir : str = Field(description = "The name of the local directory to download the paper text to"),
+                        chunk_size : int = Field(description = "The chunk size to use when breaking up the paper text into smaller chunks for processing. Defaults to 500"),
+                        num_results : int = Field(description = "The number of results to return. Defaults to 5"),
+                        similarity_threshold : float = Field(description="The similarity threshold to use when filtering out query search results. Defaults to 0.5")) -> list[Document]:
+# chunk_size : int = Field(descriotion = )500,
+#                         num_results : int = 5,
+#                         similarity_threshold : float = 0.5):
+    """Take a pubmed paper ID and run a query on it. The query is a plaintext string. The function returns the top `num_results` most relevant text chunks from the paper."""
+    from .NCBI import call_api
+    os.makedirs(download_dir, exist_ok = True)
     documents = []
-    pubmed_response = call_api(pubmed_query_url).decode()
-    documents.extend(pubmed_response)
-    bm25_retriever = BM25Retriever.from_texts(documents, metadatas = [{"source" : 1}] * len(documents))
-    bm25_retriever.k = 5
+    pmc_fname = os.path.join(download_dir, f"{pmc_id}.txt")
+    pubmed_query_url = f"https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=pmc&id={pmc_id}"
+    if not os.path.exists(pmc_fname):
+        pubmed_response = call_api(pubmed_query_url).decode()
+        pubmed_text = pubmed_xml_to_text(pubmed_response)
+        with open(pmc_fname, "w") as f:
+            f.write(pubmed_text)
+    else:
+        with open(pmc_fname, "r") as f:
+            pubmed_text = f.read()
+    documents = [Document(page_content=pubmed_text, metadata={"source": pmc_id})]
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=chunk_size, chunk_overlap=10,
+                                                       separators=["\n\n", "\n", ".", ", ", " ", ""])
+    split_docs = text_splitter.split_documents(documents)
     embedding = OpenAIEmbeddings()
-    faiss_vectorstore = FAISS.from_texts(documents, embedding, metadatas = [{"source" : 1}] * len(documents))
-    faiss_retriever = faiss_vectorstore.as_retriever(search_kwargs = {"k" : 5})
-    ensemble_retriever = EnsembleRetriever([bm25_retriever, faiss_retriever], weidhts = [0.5, 0.5])
-    docs = ensemble_retriever.invoke("Authors")
-    return docs
+    faiss_retriever = FAISS.from_documents(split_docs, embedding).as_retriever(search_kwargs={"k": 5})
+    bm25_retriever = BM25Retriever.from_documents(split_docs, preprocess_func=preprocess_text)
+    bm25_retriever.k = num_results
+    redundant_filter = EmbeddingsRedundantFilter(embeddings=embedding)
+    embeddings_filter = EmbeddingsFilter(embeddings=embedding, k=None, similarity_threshold=similarity_threshold)
+    pipeline_compressor = DocumentCompressorPipeline(transformers=[redundant_filter, embeddings_filter])
+    compression_retriever = ContextualCompressionRetriever(base_compressor=pipeline_compressor, base_retriever=faiss_retriever)
+    ensemble_retriever = EnsembleRetriever(retrievers=[bm25_retriever, compression_retriever], weights=[0.5, 0.5])
+    compressed_docs = await ensemble_retriever.aget_relevant_documents(query)
+    res = compressed_docs[:num_results]
+    return res
 
 
 async def search_duckduckgo(query: str, langchain_compressor: LangchainCompressor,
