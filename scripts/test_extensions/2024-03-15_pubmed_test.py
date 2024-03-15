@@ -40,10 +40,12 @@ async def main():
     # query = """Answer the following question. Do thorough research then answer yes/no/maybe and give justification: 'Does repeated hyperbaric exposure to 4 atmosphere absolute cause hearing impairment?' If you are 70 percent certain of an answer (yes/no) give that as your final answer."""
     # query = "What specific methods were used in the paper with PubMed Central ID PMC1790863?"
     # query = "Is the PubMed Central article with ID PMC1790863 open access? If so, download it, unzip it if necessary, and tell me the final path to the PDF"
-    query = "Who are the authors of the paper with PubMed Central ID PMC1790863?"
+    # query = "Who are the authors of the paper with PubMed Central ID PMC1790863?"
+    query = """Make a plan and execute it to answer the following question using all research methods necessary: 'Do mitochondria play a role in remodelling lace plant leaves during programmed cell death?'"""
 
     # tools = [get_geo_api_info, get_genomic_api_info, ncbi_api_call, write_to_file, read_file, get_pubmed_api_info]
-    tools = [get_pubmed_central_oa, write_to_file, read_file, ftp_download, unzip_tar_gz, search_pubmed_paper, list_files_in_dir, ask_pdf_paper]
+    # tools = [get_pubmed_central_oa, write_to_file, read_file, ftp_download, unzip_tar_gz, search_pubmed_paper, list_files_in_dir, ask_pdf_paper]
+    tools = [get_pubmed_central_oa, write_to_file, read_file, ftp_download, unzip_tar_gz, search_pubmed_paper, list_files_in_dir, ask_pdf_paper, get_geo_api_info, get_genomic_api_info, ncbi_api_call, get_pubmed_api_info]
     response, metadata = await manager.acall(query,
                                 #    [ask_pdf_paper, search_web],
                                     tools,

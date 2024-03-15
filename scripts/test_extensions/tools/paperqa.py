@@ -24,5 +24,3 @@ async def ask_pdf_paper(file_location : str = Field(description="The location of
     answer = await docs.aquery(question)
     formatted_answer = answer.formatted_answer
     return formatted_answer
-
-# async def main():
