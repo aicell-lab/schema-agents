@@ -10,13 +10,15 @@ from schema_agents import schema_tool, Role
 from pydantic import BaseModel, Field
 from .graph_adder import plot_metdata
 from functools import partial
+import json
 
 from .tools.NCBI import get_geo_api_info, get_genomic_api_info, ncbi_api_call, get_pubmed_api_info, get_pubmed_central_oa
-from .tools.fileIO import write_to_file, read_file, ftp_download, unzip_tar_gz, list_files_in_dir
+from .tools.fileIO import write_to_file, read_file, ftp_download, unzip_tar_gz, list_files_in_dir, get_current_time
 from .tools.llm_web_search import search_pubmed_paper
 from .tools.paperqa import ask_pdf_paper
 from .tools.agents import ThoughtsSchema, recruit_agent
 from .serialize import dump_metadata_json
+from .visualize_reasoning import visualize_reasoning_chain
 
 
 async def main():
@@ -42,15 +44,19 @@ async def main():
     # query = "Who are the authors of the paper with PubMed Central ID PMC1790863?"
     # query = """Make a plan and execute it to answer the following question using all research methods necessary: 'Do mitochondria play a role in remodelling lace plant leaves during programmed cell death?'"""
     # query = "Recruit an agent to perform the task of creating a text file and writing the phrase `hello world` to the file. Give the agent a name, instructions, a query, and the tools to use"
-    query = "Make a plan and execute it to have agents write a text file with the contents `hello world`. Then have another agent read that file and print the contents to another file with the current and and time appended to the contents of the first file."
+    # query = "Make a plan and execute it to have agents write a text file whose contents are the current year and time. Then have another agent read that file and print the contents to another file containing a poem about the time in the file contents. Use as many agents as necessary and keep looping until the job is complete"
     # query = """Make a plan and execute it to answer the following question using all research methods necessary: 'Do mitochondria play a role in remodelling lace plant leaves during programmed cell death?'. Recruit as many agents as necessary to complete the task and modify the team if they perform poorly."""
+    query = """Make a plan and execute it to answer the following question using all research methods necessary. Make sure to recruit agents to perform sub-tasks and modify the agent team if they perform poorly. You MUST limit your paper search to open access papers: 'List signaling molecules (ligands) that interact with the receptor EGFR?' Do not use an api key for the NCBI api"""
+    # query = """Construct an NCBI query url to answer the following question. You are ONLY allowed to use papers from before the year 2002. You MUST limit your paper search to open access papers: 'Is leptin involved in phagocytic NADPH oxidase overactivity in obesity?'"""
+    
+    # query = """Make a plan and recruit agents to complete the following task: `Take the PubMed Central articles with IDs PMC1790863, PMC10500329, and PMC10669231, identify the second author in each of them, and create a single tsv file listing the paper titles, journal, and second author name`. Do this by recruiting individual agents for each paper"""
 
     # tools = [get_geo_api_info, get_genomic_api_info, ncbi_api_call, write_to_file, read_file, get_pubmed_api_info]
     # tools = [get_pubmed_central_oa, write_to_file, read_file, ftp_download, unzip_tar_gz, search_pubmed_paper, list_files_in_dir, ask_pdf_paper]
     tools_static = [get_pubmed_central_oa, write_to_file, read_file, 
              ftp_download, unzip_tar_gz, search_pubmed_paper, 
              list_files_in_dir, ask_pdf_paper, get_geo_api_info, 
-             get_genomic_api_info, ncbi_api_call, get_pubmed_api_info]
+             get_genomic_api_info, ncbi_api_call, get_pubmed_api_info, get_current_time]
     
     @schema_tool
     async def recruit_agent_local(agent_name : str = Field(description="The name of the agent to recruit"),
@@ -79,7 +85,11 @@ async def main():
                                    thoughts_schema=ThoughtsSchema,
                                    )
     
-    dump_metadata_json(metadata, "metadata.json")
+    metadata_json_fname = "metadata.json"
+    dump_metadata_json(metadata, metadata_json_fname)
+    with open(metadata_json_fname) as f:
+        metadata_json = json.load(f)
+    visualize_reasoning_chain(metadata_json, file_path_gv='reasoning_chain_visualization_auto.gv', view = True)
     print(response)
 
 if __name__ == "__main__":

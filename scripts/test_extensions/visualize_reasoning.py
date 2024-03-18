@@ -1,5 +1,6 @@
 import json
 from graphviz import Digraph
+import sys
 
 def format_detail_value(value):
     """Format detail values for display in the graph, converting all types to strings."""
