@@ -3,11 +3,7 @@ requires = ["setuptools", "wheel"]
 
 [project]
 name = "schema-agents"
-<<<<<<< HEAD
-version = "0.1.26"
-=======
-version = "0.1.44"
->>>>>>> origin/main
+version = "0.1.45"
 readme = "README.md"
 description = "A schema-based LLM framework for building multi-agent collaborative systems."
 dependencies = [
@@ -22,13 +18,10 @@ dependencies = [
     "pyyaml",
     "tiktoken",
     "tenacity",
-<<<<<<< HEAD
-    "langchain",
-=======
     "openapi-pydantic",
+    "makefun>=1.15.2",
     "langchain>=0.1.10",
     "langchain-community>=0.0.25"
->>>>>>> origin/main
 ]
 
 [tool.setuptools]
