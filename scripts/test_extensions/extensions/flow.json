@@ -1,0 +1,79 @@
+{
+    "steps": [
+        {
+            "name": "Document Analysis",
+            "agent": {
+                "name": "Document Analyst",
+                "instructions": "Read and summarize the scientific paper, highlighting the main findings, methodologies, and any specific requirements (software, data, etc.) needed to reproduce the results."
+            },
+            "input_schema": {
+                "class_name": "ScientificPaper",
+                "class_description": "A document detailing the findings, methodologies, and data of a scientific research project."
+            },
+            "output_schema": {
+                "class_name": "SummaryReport",
+                "class_description": "A document summarizing the main findings, methodologies, and specific requirements needed to reproduce the results of the scientific paper."
+            }
+        },
+        {
+            "name": "Methodology Review",
+            "agent": {
+                "name": "Research Methodologist",
+                "instructions": "Review the methodologies section summarized by the Document Analyst to ensure understanding of the procedures and identify any potential challenges in reproducing the results."
+            },
+            "input_schema": {
+                "class_name": "SummaryReport",
+                "class_description": "A document summarizing the main findings, methodologies, and specific requirements needed to reproduce the results of the scientific paper."
+            },
+            "output_schema": {
+                "class_name": "MethodologyInsights",
+                "class_description": "A document providing insights into the methodologies, including understanding of procedures and identification of potential challenges in reproducing the results."
+            }
+        },
+        {
+            "name": "Data Preparation",
+            "agent": {
+                "name": "Data Scientist",
+                "instructions": "Acquire or simulate the necessary data as described in the paper. Prepare the data for analysis, following the methodologies outlined by the Research Methodologist."
+            },
+            "input_schema": {
+                "class_name": "MethodologyInsights",
+                "class_description": "A document providing insights into the methodologies, including understanding of procedures and identification of potential challenges in reproducing the results."
+            },
+            "output_schema": {
+                "class_name": "PreparedData",
+                "class_description": "Data that has been acquired or simulated and prepared for analysis, following the methodologies outlined."
+            }
+        },
+        {
+            "name": "Software Development",
+            "agent": {
+                "name": "Software Engineer",
+                "instructions": "Develop or configure the necessary software tools, scripts, or environments needed to reproduce the experiments or analyses as described in the paper. Collaborate with the Data Scientist to ensure the software meets the data analysis needs."
+            },
+            "input_schema": {
+                "class_name": "PreparedData",
+                "class_description": "Data that has been acquired or simulated and prepared for analysis, following the methodologies outlined."
+            },
+            "output_schema": {
+                "class_name": "SoftwareTools",
+                "class_description": "Software tools, scripts, or environments developed or configured to reproduce the experiments or analyses as described in the paper."
+            }
+        },
+        {
+            "name": "Quality Assurance",
+            "agent": {
+                "name": "Quality Assurance Specialist",
+                "instructions": "Verify the accuracy of the reproduced results by comparing them with the results reported in the paper. Ensure that all steps of the reproduction process are documented and can be followed by others."
+            },
+            "input_schema": {
+                "class_name": "SoftwareTools",
+                "class_description": "Software tools, scripts, or environments developed or configured to reproduce the experiments or analyses as described in the paper."
+            },
+            "output_schema": {
+                "class_name": "ReproductionReport",
+                "class_description": "A document verifying the accuracy of the reproduced results and ensuring that the reproduction process is well documented and can be followed by others."
+            }
+        }
+    ]
+}
