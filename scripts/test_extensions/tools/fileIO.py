@@ -41,7 +41,7 @@ async def unzip_tar_gz(file : str = Field(description="The file to unzip")) -> s
     import tarfile
     with tarfile.open(file, "r:gz") as tar:
         tar.extractall()
-    return f"Success - file unzipped to {file.replace('.tar.gz', '')}"
+    return f"Success - file unzipped to {file.replace('.tar.gz', '')}. You may wish to inspect the contents of the directory using the `list_files_in_dir` tool."
 
 @schema_tool
 async def list_files_in_dir(dir : str = Field(description="The directory to list files in")) -> list[str]:

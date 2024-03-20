@@ -10,6 +10,8 @@ def convert_to_serializable(data):
         return {key: convert_to_serializable(value) for key, value in data.items()}
     elif isinstance(data, list):
         return [convert_to_serializable(item) for item in data]
+    elif isinstance(data, tuple):
+        return tuple(convert_to_serializable(item) for item in data)
     elif hasattr(data, 'dict'):  # Check if it's a Pydantic model instance
         return convert_to_serializable(data.dict())
     return data

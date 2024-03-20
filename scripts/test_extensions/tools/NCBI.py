@@ -13,18 +13,30 @@ from schema_agents.role import Message
 from schema_agents import schema_tool, Role
 import time
 import urllib.request
+import aiohttp
 
-def call_api(url):
-    time.sleep(1)
-    url = url.replace(' ', '+')
-    print(url)
+# def call_api(url):
+#     time.sleep(1)
+#     url = url.replace(' ', '+')
+#     print(url)
 
-    req = urllib.request.Request(url) 
-    with urllib.request.urlopen(req) as response:
-        call = response.read()
+#     req = urllib.request.Request(url) 
+#     with urllib.request.urlopen(req) as response:
+#         call = response.read()
 
-    # return call.decode()
-    return call
+#     # return call.decode()
+#     return call
+
+async def call_api(url: str) -> bytes:
+    url = url.replace(' ', '+')  # This is basic encoding, consider using urllib.parse.quote_plus for more comprehensive encoding
+    async with aiohttp.ClientSession() as session:
+        try:
+            async with session.get(url) as response:
+                response.raise_for_status()  # Raises an exception for 4XX/5XX errors
+                return await response.read()
+        except aiohttp.ClientError as e:
+            print(f"Failed to fetch data from {url}: {e}")
+            raise  # Rethrow the exception or handle it as needed
 
 
 
@@ -131,32 +143,41 @@ Query: Fetch the details of the Pubmed Central article with the ID 7615674
     return s
 
 @schema_tool
+async def pubmed_api(ncbi_query_url : str = Field(description = "The NCBI API to use for this query")) -> str:
+    """Use the PubMed Central tool as specific in the `get_pubmed_api_info` tool. Use that tool before using this one. DO NOT USE AN API KEY."""
+    query_response = await call_api(ncbi_query_url)
+    query_response = query_response.decode()
+    return query_response
+
+@schema_tool
 async def ncbi_api_call(ncbi_query_url : str = Field(description = "A url that uses the NCBI web apis to get information relevant to questions and task completion")) -> str:
-    """Use the NCBI Web API to work on tasks that are aided by use of the NCBI databases"""
-    query_response = call_api(ncbi_query_url)
+    """Use the NCBI Web API to work on tasks that are aided by use of the NCBI databases. Limit your use of this tool ONLY to tools that you have researched using `_info` functions"""
+    query_response = await call_api(ncbi_query_url)
+    query_response = query_response.decode()
     return query_response
 
 
-
 @schema_tool
-async def get_pubmed_central_oa(pmc_id : str = Field(description="The Pubmed Central ID of the article to get e.g. PMC1790863")) -> str:
+async def get_pubmed_central_oa(pmc_id: str = Field(description="The Pubmed Central ID of the article to get e.g. PMC1790863")) -> str:
     """Checks if the article with the given PubMed Central ID is open access. If it is, returns the ftp link for the article's contents. If it is not, returns a message indicating that the article is not open access."""
     query_url = f"https://www.ncbi.nlm.nih.gov/pmc/utils/oa/oa.fcgi?id={pmc_id}"
-    xml_content = call_api(query_url).decode()
-    # Parse the XML content
-    root = ET.fromstring(xml_content)
-
-    # Check if the XML content contains <record> tags
-    records = root.findall('.//record')
-    if records:
-        # Find the <link> tags within and give the "href" of those links
-        links = [link.get('href') for record in records for link in record.findall('.//link')]
-        if len(links) == 1:
-            return f"The article is open access. Here's the only link I could find to download the article's resources:\n{links[0]}"
-        elif len(links) == 0:
-            return "The article is not open access."
+    try:
+        xml_content = await call_api(query_url)
+        xml_content = xml_content.decode()
+        root = ET.fromstring(xml_content)
+        records = root.findall('.//record')
+        if records:
+            links = [link.get('href') for record in records for link in record.findall('.//link')]
+            if len(links) == 1:
+                return f"The article is open access. Here's the only link I could find to download the article's resources:\n{links[0]}"
+            elif len(links) == 0:
+                return "The article is not open access. Are you sure you queried PubMed Central (db=pmc) and not PubMed (db=pubmed)? If you searched db=pubmed, you are searching the wrong database."
+            else:
+                link_list_formatted = '\n'.join(links)
+                return f"The article is open access. I found multiple article resource FTP download links:\n{link_list_formatted}"
         else:
-            link_list_formatted = '\n'.join(links)
-            return f"The article is open access. I found multiple article resource FTP download links:\n{link_list_formatted}"
-    else:
-        return "The article is not open access."
+            return "The article is not open access. Are you sure you queried PubMed Central (db=pmc) and not PubMed (db=pubmed)? If you searched db=pubmed, you are searching the wrong database."
+
+    except Exception as e:
+        return f"An error occurred while fetching or processing the article data: {e}"
+    

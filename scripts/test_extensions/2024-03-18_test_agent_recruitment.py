@@ -12,23 +12,31 @@ from .graph_adder import plot_metdata
 from functools import partial
 import json
 
-from .tools.NCBI import get_geo_api_info, get_genomic_api_info, ncbi_api_call, get_pubmed_api_info, get_pubmed_central_oa
+from .tools.NCBI import get_geo_api_info, get_genomic_api_info, ncbi_api_call, get_pubmed_api_info, get_pubmed_central_oa, pubmed_api
 from .tools.fileIO import write_to_file, read_file, ftp_download, unzip_tar_gz, list_files_in_dir, get_current_time
 from .tools.llm_web_search import search_pubmed_paper
-from .tools.paperqa import ask_pdf_paper
+from .tools.paperqa_tools import ask_pdf_paper, ask_pdf_paper_info
 from .tools.agents import ThoughtsSchema, recruit_agent
 from .serialize import dump_metadata_json
 from .visualize_reasoning import visualize_reasoning_chain
 
+INSTRUCTIONS = """
+You are the overall task manager. Your job is to complete the user's task completely.
+- Check your final response (the last `CompleteUserQuery`). If it does not provide a satisfactory answer to the original task, revise your plan and try again. 
+- You MUST acknowledge that you understand these instructions by having your first action be a `Message` with the text "Acknowledged. I understand the instructions followed by a list of tools that end in `_info`"
+- Your second step MUST be to do a preliminary tool discovery step by calling all of the tools that end in `_info` and using the results to make a plan that you execute and modify.
+- You MUST use plans that exclusively recruit agents to perform tasks. Do not perform any tasks on your own other than checking the `_info` tools and making plans.
+- If one agent reaches its maximum number of steps before finishing its task, take what it learned and use that to recruit another agent to finish the task.
+"""
 
 async def main():
 
     # prompt = s + "\n\n" + "User question : What is the official gene symbol of LMP10?"
-
+    manager_instructions =  INSTRUCTIONS
     manager = Role(
         name="manager",
-        instructions = "You are the manager. Your job is to complete the user's task completely. If it fails, revise your plan and keep trying until it's done",
-        constraints=None,
+        instructions = manager_instructions,
+        constraints="You cannot perform any tasks on your own other than calling `_info` tools, recruiting agents by calling `recruit_agent_local`, making plans, and modifying your plans",
         register_default_events=True,
     )
 
@@ -46,8 +54,9 @@ async def main():
     # query = "Recruit an agent to perform the task of creating a text file and writing the phrase `hello world` to the file. Give the agent a name, instructions, a query, and the tools to use"
     # query = "Make a plan and execute it to have agents write a text file whose contents are the current year and time. Then have another agent read that file and print the contents to another file containing a poem about the time in the file contents. Use as many agents as necessary and keep looping until the job is complete"
     # query = """Make a plan and execute it to answer the following question using all research methods necessary: 'Do mitochondria play a role in remodelling lace plant leaves during programmed cell death?'. Recruit as many agents as necessary to complete the task and modify the team if they perform poorly."""
-    query = """Make a plan and execute it to answer the following question using all research methods necessary. Make sure to recruit agents to perform sub-tasks and modify the agent team if they perform poorly. You MUST limit your paper search to open access papers: 'List signaling molecules (ligands) that interact with the receptor EGFR?' Do not use an api key for the NCBI api"""
+    # query = """Make a plan and execute it to answer the following question using all research methods necessary. Make sure to recruit agents to perform sub-tasks and modify the agent team if they perform poorly. You MUST limit your paper search to open access papers: 'List signaling molecules (ligands) that interact with the receptor EGFR?' Do not use an api key for the NCBI api"""
     # query = """Construct an NCBI query url to answer the following question. You are ONLY allowed to use papers from before the year 2002. You MUST limit your paper search to open access papers: 'Is leptin involved in phagocytic NADPH oxidase overactivity in obesity?'"""
+    query = """Answer the following question with a yes/no and provide justification: `Can losartan reduce brain atrophy in Alzheimer's disease?`. Use AT MOST 2 papers at a time."""
     
     # query = """Make a plan and recruit agents to complete the following task: `Take the PubMed Central articles with IDs PMC1790863, PMC10500329, and PMC10669231, identify the second author in each of them, and create a single tsv file listing the paper titles, journal, and second author name`. Do this by recruiting individual agents for each paper"""
 
@@ -56,13 +65,13 @@ async def main():
     tools_static = [get_pubmed_central_oa, write_to_file, read_file, 
              ftp_download, unzip_tar_gz, search_pubmed_paper, 
              list_files_in_dir, ask_pdf_paper, get_geo_api_info, 
-             get_genomic_api_info, ncbi_api_call, get_pubmed_api_info, get_current_time]
+             get_genomic_api_info, get_pubmed_api_info, get_current_time, pubmed_api]
     
     @schema_tool
     async def recruit_agent_local(agent_name : str = Field(description="The name of the agent to recruit"),
                             agent_instructions : str = Field(description = "The role instructions to give to the agent. This is a general description of the agent's role"),
                             query : str = Field(description = "The specific task to give to the agent"),):
-        """Recruit an agent to perform a specific task. Give the agent a name, instructions, a query, and the tools to use"""
+        """Recruit an agent to perform a specific task. Give the agent a name, instructions, a query, and the tools to use. You MUST force the agent to use all the `_info` tools before doing anything else"""
         agent = Role(name=agent_name,
                         instructions = agent_instructions,
                         constraints=None,
@@ -75,11 +84,13 @@ async def main():
                                     thoughts_schema=ThoughtsSchema,
                                     )
         return response, metadata
-
-    tools = tools_static + [recruit_agent_local]
+    manager_tools = [get_geo_api_info, get_genomic_api_info, 
+                     get_pubmed_api_info,ask_pdf_paper_info, 
+                     recruit_agent_local]
+    # tools = tools_static + [recruit_agent_local]
     response, metadata = await manager.acall(query,
                                 #    [ask_pdf_paper, search_web],
-                                    tools,
+                                    manager_tools,
                                    return_metadata=True,
                                    max_loop_count = 10,
                                    thoughts_schema=ThoughtsSchema,
@@ -90,6 +101,8 @@ async def main():
     with open(metadata_json_fname) as f:
         metadata_json = json.load(f)
     visualize_reasoning_chain(metadata_json, file_path_gv='reasoning_chain_visualization_auto.gv', view = True)
+    with open('metadata_complete.txt', 'w') as f:
+        print(metadata, file = f)
     print(response)
 
 if __name__ == "__main__":
