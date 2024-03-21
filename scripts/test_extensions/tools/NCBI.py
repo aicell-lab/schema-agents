@@ -166,17 +166,18 @@ async def get_pubmed_central_oa(pmc_id: str = Field(description="The Pubmed Cent
         xml_content = xml_content.decode()
         root = ET.fromstring(xml_content)
         records = root.findall('.//record')
+        failure_string = "The article is not open access. Are you sure you queried PubMed Central (db=pmc) and not PubMed (db=pubmed)? If you searched db=pubmed, you are searching the wrong database. Here's the xml content of the repsonse:\n" + xml_content
         if records:
             links = [link.get('href') for record in records for link in record.findall('.//link')]
             if len(links) == 1:
                 return f"The article is open access. Here's the only link I could find to download the article's resources:\n{links[0]}"
             elif len(links) == 0:
-                return "The article is not open access. Are you sure you queried PubMed Central (db=pmc) and not PubMed (db=pubmed)? If you searched db=pubmed, you are searching the wrong database."
+                return failure_string
             else:
                 link_list_formatted = '\n'.join(links)
                 return f"The article is open access. I found multiple article resource FTP download links:\n{link_list_formatted}"
         else:
-            return "The article is not open access. Are you sure you queried PubMed Central (db=pmc) and not PubMed (db=pubmed)? If you searched db=pubmed, you are searching the wrong database."
+            return failure_string
 
     except Exception as e:
         return f"An error occurred while fetching or processing the article data: {e}"
