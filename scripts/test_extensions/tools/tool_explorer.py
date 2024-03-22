@@ -10,6 +10,18 @@ from langchain_community.vectorstores import FAISS
 from langchain_openai import OpenAIEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain.schema.document import Document
+from ..serialize import get_docstring_from_async_function
+import importlib
+
+def get_function_reference(node, module_path):
+    """
+    Import the module and return a reference to the function defined by the node.
+    """
+    module_name = module_path.stem  # Assuming module_path is a pathlib.Path object
+    spec = importlib.util.spec_from_file_location(module_name, module_path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return getattr(module, node.name)
 
 class SchemaToolVisitor(ast.NodeVisitor):
     def __init__(self):
@@ -27,22 +39,6 @@ class SchemaToolVisitor(ast.NodeVisitor):
                 self.schema_tools.append(node)
         # Continue to visit the children of the node
         self.generic_visit(node)
-
-def get_docstring_from_async_function(async_function_node):
-    """
-    Extracts the docstring from an ast.AsyncFunctionDef node if it exists.
-    
-    :param async_function_node: An instance of ast.AsyncFunctionDef
-    :return: The docstring as a string if found, otherwise None
-    """
-    # Check if the async function has a body and the first element of the body is an expression
-    if async_function_node.body and isinstance(async_function_node.body[0], ast.Expr):
-        # The first element of the body could be a docstring (as an expression)
-        first_element = async_function_node.body[0]
-        # Depending on the Python version, the docstring can be in ast.Str (Python <3.8) or ast.Constant (Python >=3.8)
-        if hasattr(first_element, 'value') and isinstance(first_element.value, (ast.Str, ast.Constant)):
-            return first_element.value.s  # Extract the string value
-    return "No docstring provided"  # No docstring found
 
 async def list_schema_tools(top_directory : str, 
                             exclude_funcs : Set[str] = {}, 
@@ -74,10 +70,17 @@ async def list_schema_tools(top_directory : str,
                 tree = ast.parse(source)
                 visitor = SchemaToolVisitor()
                 visitor.visit(tree)
-                d = {t.name : {'ast' : t,
-                               'usage' : usage_strings.get(t.name, {'usage' : "No usage string provided"})['usage'],
-                               'docstring' : get_docstring_from_async_function(t)} 
-                    for t in visitor.schema_tools}
+                for t in visitor.schema_tools:
+                    func_ref = get_function_reference(t, py_file)
+                    d = {t.name : {
+                            'usage' : usage_strings.get(t.name, {'usage' : "No usage string provided"})['usage'],
+                            'docstring' : get_docstring_from_async_function(t),
+                            'func_ref': func_ref,  # Store the function reference,
+                            'posix_path' : py_file.as_posix(),
+                            'yaml_path' : usage_yaml.as_posix(),
+                            'ast' : t,
+                            } 
+                        }
                 # schema_tools.extend(visitor.schema_tools)
                 schema_tools.update(d)
             except Exception as e:
@@ -103,16 +106,33 @@ async def create_tool_db(tool_dir,
                                            exclude_funcs = exclude_funcs,
                                            exclude_dirs = exclude_dirs,
                                            exclude_files = exclude_files)
-    tool_documents = [Document(page_content = t['docstring'], metadata = {'name' : name, 'usage' : t['usage'], 'ast' : t['ast']}) for name, t in schema_tools.items()]
+    tool_documents = [Document(page_content = t['docstring'], 
+                               metadata = {'name' : name,
+                                            'usage' : t['usage'],
+                                            'ast' : t['ast'],
+                                            'posix_path' : t['posix_path'],
+                                            'yaml_path' : t['yaml_path'],
+                                            # 'func_ref' : t['func_ref'],
+                                           }) for name, t in schema_tools.items()]
     db = FAISS.from_documents(tool_documents, OpenAIEmbeddings())
     db.save_local(save_path)
     return db
 
-async def search_tools(query : str, db_path : str) -> List[str]:
+tool_chunk ="""({i}) Tool name : {name}
+- Relevant tool description : {docstring}
+- posix path : {posix_path}
+- yaml path : {yaml_path}"""
+results_string = """I found {l} tools that might be helpful to give a hired agent to solve the task:
+{tool_chunks}"""
+
+async def search_tools(query : str, db_path : str) -> str:
     """Search for tool to solve tasks given a tool database"""
+
     db = FAISS.load_local(db_path, OpenAIEmbeddings(), allow_dangerous_deserialization=True)
     results = db.similarity_search(query)
-    return results
+    tool_chunks = '\n'.join([tool_chunk.format(i = i+1, name = x.metadata['name'], docstring = x.page_content, posix_path = x.metadata['posix_path'], yaml_path = x.metadata['yaml_path']) for i, x in enumerate(results)])
+    rs = results_string.format(l = len(results), tool_chunks = tool_chunks)
+    return rs
 
 def fixed_db_tool_search(fixed_db_path : str):
     @schema_tool

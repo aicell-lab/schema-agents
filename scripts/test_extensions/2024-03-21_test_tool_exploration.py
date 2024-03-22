@@ -52,7 +52,8 @@ async def main():
                                    max_loop_count = 10,
                                    thoughts_schema=ThoughtsSchema,
                                    )
-    
+    with open('metadata_complete.txt', 'w') as f:
+        print(metadata, file = f)
     metadata_json_fname = "metadata.json"
     dump_metadata_json(metadata, metadata_json_fname)
     with open(metadata_json_fname) as f:
