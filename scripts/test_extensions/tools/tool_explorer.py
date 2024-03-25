@@ -66,11 +66,16 @@ async def list_schema_tools(top_directory : str,
                 usage_strings = yaml.safe_load(yaml_file)
         with open(py_file, 'r', encoding = 'utf-8') as file:
             source = file.read()
+            d = {}
             try:
                 tree = ast.parse(source)
                 visitor = SchemaToolVisitor()
                 visitor.visit(tree)
                 for t in visitor.schema_tools:
+                    print(f"Found schema tool: {t.name}")
+                    if t.name in exclude_funcs:
+                        print(f"\tExcluding {t.name}")
+                        continue
                     func_ref = get_function_reference(t, py_file)
                     d = {t.name : {
                             'usage' : usage_strings.get(t.name, {'usage' : "No usage string provided"})['usage'],
@@ -81,8 +86,7 @@ async def list_schema_tools(top_directory : str,
                             'ast' : t,
                             } 
                         }
-                # schema_tools.extend(visitor.schema_tools)
-                schema_tools.update(d)
+                    schema_tools.update(d)
             except Exception as e:
                 print(f"Error parsing {py_file}: {e}")
     

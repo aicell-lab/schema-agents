@@ -41,7 +41,7 @@ def pubmed_xml_to_text(pubmed_response : str):
     article_text = extract_text(article_body).strip()
     return article_text
 
-@schema_tool
+
 async def search_pubmed_paper(query : str = Field(description = "The query to run on the paper"),
                         pmc_id : str = Field(description = "The PMC ID of the paper to query in the correct format (e.g. PMC)"),
                         chunk_size : int = Field(description = "The chunk size to use when breaking up the paper text into smaller chunks for processing. Defaults to 500"),
