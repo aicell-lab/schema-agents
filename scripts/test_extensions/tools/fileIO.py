@@ -26,7 +26,7 @@ async def read_file(string : str = Field(description="The file to read from")) -
 async def ftp_download(ftp_host : str = Field(description="The FTP host to download from. E.g. for ftp://ftp.ncbi.nlm.nih.gov/pub/pmc/oa_package/00/00/PMC1790863.tar.gz, the host is ftp.ncbi.nlm.nih.gov"),
                        remote_file_path : str = Field(description="The file path to download from the FTP server. E.g. for ftp://ftp.ncbi.nlm.nih.gov/pub/pmc/oa_package/00/00/PMC1790863.tar.gz, the file path is pub/pmc/oa_package/00/00/PMC1790863.tar.gz"),
                        out_file : str = Field(description="The file to write to. E.g. for ftp://ftp.ncbi.nlm.nih.gov/pub/pmc/oa_package/00/00/PMC1790863.tar.gz the out_file is PMC1790863.tar.gz")) -> str:
-    """Download a file from an FTP server"""
+    """Downloads a file from an FTP server given an FTP link"""
     import ftplib
     with open(out_file, 'wb') as f:
         ftp = ftplib.FTP(ftp_host)

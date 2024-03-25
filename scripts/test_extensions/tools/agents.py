@@ -14,7 +14,7 @@ class ThoughtsSchema(BaseModel):
     """Details about the thoughts"""
     reasoning: str = Field(..., description="reasoning and constructive self-criticism; make it short and concise in less than 20 words")
 
-@schema_tool
+
 async def recruit_agent(agent_tools : List[Callable] = Field(description = "The tools to equip this specific agent with. It should be a subset of all the available tools and only the ones that would be useful for this agent's task"),
                         agent_name : str = Field(description="The name of the agent to recruit"),
                         agent_instructions : str = Field(description = "The role instructions to give to the agent. This is a general description of the agent's role"),
