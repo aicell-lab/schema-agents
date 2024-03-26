@@ -15,18 +15,6 @@ import time
 import urllib.request
 import aiohttp
 
-# def call_api(url):
-#     time.sleep(1)
-#     url = url.replace(' ', '+')
-#     print(url)
-
-#     req = urllib.request.Request(url) 
-#     with urllib.request.urlopen(req) as response:
-#         call = response.read()
-
-#     # return call.decode()
-#     return call
-
 async def call_api(url: str) -> bytes:
     url = url.replace(' ', '+')  # This is basic encoding, consider using urllib.parse.quote_plus for more comprehensive encoding
     async with aiohttp.ClientSession() as session:
