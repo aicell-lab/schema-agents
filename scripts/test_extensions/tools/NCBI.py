@@ -159,7 +159,7 @@ async def ncbi_api_call(ncbi_query_url : str = Field(description = "A url that u
 
 @schema_tool
 async def get_pubmed_central_oa(pmc_id: str = Field(description="The Pubmed Central ID of the article to get e.g. PMC1790863")) -> str:
-    """Checks if the article with the given PubMed Central ID is open access. If it is, returns the ftp link for the article's contents. If it is not, returns a message indicating that the article is not open access."""
+    """Checks if the article with the given PubMed Central ID is open access. If it is, returns the ftp link to the article's contents which must be downloaded using another FTP tool. If it is not open access, returns a message indicating that the article is not open access."""
     query_url = f"https://www.ncbi.nlm.nih.gov/pmc/utils/oa/oa.fcgi?id={pmc_id}"
     try:
         xml_content = await call_api(query_url)

@@ -45,16 +45,13 @@ async def hire_agent(agent_name : str = Field(description = "A name for the agen
     return f"Agent {agent_name} hired successfully"
 
 class UsefulTools(BaseModel):
-    """A list of tools that are useful for the task."""
+    """A list of tools that are useful for the task or fixing the current state of the project"""
     tools : List[str] = Field(description = "The names of the tools to use for the task")
-
-class AgentsSteps(BaseModel):
-    """The steps that you, the hired agent, used to complete the task given to you"""
-    steps : List[str] = Field(description = "All the steps that you took including the tools you used and the reasoning behind each step")
 
 @schema_tool
 async def use_hired_agent(agent_name : str = Field(description = "The name of the agent to use"),
-                        agent_task : str = Field(description = "The specific task to give to the agent")) -> str:
+                        agent_task : str = Field(description = "The specific task to give to the agent"),
+                        suggested_tools : Optional[str] = Field(description = "Tools suggested by the manager that might be helpful")) -> str:
     """Use a hired agent to complete a specific task"""
 
     agent = agents[agent_name]
@@ -63,6 +60,8 @@ async def use_hired_agent(agent_name : str = Field(description = "The name of th
     tool_query = f"""You have been given the following task : `{agent_task}`
 
 Reason about what this task might involve and use the `search_tools` tool to find tools that will be useful for this task.
+
+The manager that hired you has suggested that the following tools might be helpful: `{suggested_tools}`
     """
     tool_response, tool_metadata = await agent.acall(tool_query,
                                         tools = [search_tools],
@@ -99,16 +98,26 @@ async def check_completion(project_goal : str, current_response : str, manager :
     
 The current state of the project is the following : `{current_response}`
 
-Has the current state of the project COMPLETELY satified the project goal? If yes, then summarize why the project is complete. If no, give a complete description of how the current state falls short and what needs to be done to finish the project.
+Has the current state of the project COMPLETELY satified the project goal? 
+If yes, then summarize why the project is complete.
+If no, give a complete description of how the current state falls short and what needs to be done to finish the project. In this description throw away any comments about the system's capabilities or the capabilities of other agents. Only focus on the project completion status.
     """
-    completion_res = await manager.aask(check_query, CheckCompletion)
+    # completion_res = await manager.aask(check_query, CheckCompletion)
+    completion_res, _ = await manager.acall(check_query, [search_tools], output_schema = CheckCompletion, return_metadata=True)
     
     return completion_res
+
+
+class ManagerSuggestions(BaseModel):
+    """The manager's suggestions for the next steps in the project completion process"""
+    suggested_next_steps : str = Field(description = "The manager's suggestion for the next steps in the project completion process")
+    suggested_tools : List[str] = Field(description = "A list of tools from the tool database that are suggested for completing the project")
 
 class ProjectState(BaseModel):
     """The current state of the project and the ultimate project goal. Use this to make and execute a plan to complete the project"""
     project_goal : str = Field(description = "The ultimate project goal")
     current_state : str = Field(description = "A summary of the the current state of the project")
+    manager_suggestions : ManagerSuggestions = Field(description = "The manager's suggestions for the next steps in the project completion process")
 
 async def main():
     manager = Role(
@@ -118,14 +127,20 @@ async def main():
         register_default_events=True,
     )
     project_task = "Download and unzip the PubMed Central article with ID 1790863"
-    project_response, project_metadata = await manager.acall(project_task, [hire_agent, use_hired_agent], return_metadata=True)
+    manager_suggestions, _ = await manager.acall(project_task, [search_tools], output_schema = ManagerSuggestions, return_metadata=True)
+    project_state = ProjectState(project_goal = project_task,
+                                 current_state = "No agents have been recruited yet. The project has not been started yet.",
+                                 manager_suggestions = manager_suggestions)
+    project_response, project_metadata = await manager.acall(project_state, [hire_agent, use_hired_agent], return_metadata=True)
     completion_res = await check_completion(project_goal = project_task, current_response = project_response, manager = manager)
 
     manager_iterations = 0
     max_manager_iterations = 5
     
     while not completion_res.project_complete and manager_iterations < max_manager_iterations:
-        project_state = ProjectState(project_goal = project_task, current_state = completion_res.summary)
+        manager_suggestions, _ = await manager.acall(project_task, [search_tools], output_schema = ManagerSuggestions, return_metadata=True)
+
+        project_state = ProjectState(project_goal = project_task, current_state = completion_res.summary, manager_suggestions = manager_suggestions)
         project_response, project_metadata = await manager.acall(project_state, [hire_agent, use_hired_agent], return_metadata=True)
         completion_res = await check_completion(project_goal = project_task, current_response = project_response, manager = manager)
         manager_iterations += 1
