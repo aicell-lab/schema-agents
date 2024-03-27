@@ -39,7 +39,7 @@ import urllib.request
 #     """
 #     return "Query a PDF paper for information"
 
-@schema_tool
+
 async def ask_pdf_paper_info() -> str:
     """Get information about the `ask_pdf_paper` tool"""
     return """The `ask_pdf_paper` tool lets you query a PDF paper for information with natural language queries."""

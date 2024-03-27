@@ -12,20 +12,23 @@ from langchain.schema.document import Document
 from .tools.agents import ThoughtsSchema
 from .serialize import dump_metadata_json
 from .visualize_reasoning import visualize_reasoning_chain
-from .tools.tool_explorer import create_tool_db, fixed_db_tool_search, list_schema_tools
+from .tools.tool_explorer import create_tool_db, list_schema_tools
 
 import argparse
 
 def initialize_tools(tool_dir, db_path):
-    global AGENT_TOOLS, tool_db, agents
+    global AGENT_TOOLS, tool_db, agents, toolsets
     AGENT_TOOLS = asyncio.run(list_schema_tools(tool_dir))
+    toolsets = {}
+    for tool_name, tool in AGENT_TOOLS.items():
+        if tool['posix_path'] not in toolsets:
+            toolsets[tool['posix_path']] = tool['toolset_usage']
     tool_db = asyncio.run(create_tool_db(tool_dir=tool_dir,
                                 save_path = db_path,))
     agents = {}
-    # search_tools = fixed_db_tool_search(fixed_db_path = db_path)
 
 @schema_tool
-async def search_tools(query : str = Field(description="The query to search against the tool database")) -> str:
+async def search_tools(query : str = Field(description="A short description of the actions involved in your task. This description will be searched against the tool database")) -> str:
     """Search for tool to solve tasks given a tool database"""
     tool_chunk ="""({i}) Tool name : {name}\n- Relevant tool description : {docstring}\n- posix path : {posix_path}\n- yaml path : {yaml_path}"""
     results_string = """I found {l} tools that might be helpful to give a hired agent to solve the task:\n{tool_chunks}"""
@@ -35,18 +38,29 @@ async def search_tools(query : str = Field(description="The query to search agai
     return rs
 
 @schema_tool
+async def get_toolset_usage(posix_path : str = Field(description = "The posix path of the toolset")) -> str:
+    """Gets the usage of the toolset that a tool belongs to"""
+    return toolsets[posix_path]
+
+@schema_tool
 async def get_tool_usage(tool_name : str = Field(description = "The name of the tool in the tool database")) -> str:
     """Gets more detailed tool usage on a specific tool in the tool database"""
-    u = AGENT_TOOLS[tool_name]['usage']
+    tu = AGENT_TOOLS[tool_name]['usage']
+    u = f"""This tool's is part of the toolset `{AGENT_TOOLS[tool_name]['posix_path']}`\n\nThis specific tool's usage documentation is the following : `{tu}`"""
     return u
 
+@schema_tool
+async def check_hired_agents() -> str:
+    """Reviews the agents that have already been hired"""
+    agent_string = [f"{k} ({v})" for k, v in agents.items()]
+    return f"Currently hired agents: {agent_string}"
 
 @schema_tool
 async def hire_agent(agent_name : str = Field(description = "A name for the agent"),
                     agent_description : str = Field(description = "The description of the agent to hire phrased in the 'you' tense. E.g. `You are an autonomous software agent specialized in X`")) -> str:
-    """Hire an agent with a certain specialization for completing sub-tasks"""
+    """Hire an agent with a certain specialization for completing certain sub-tasks if no agent with a similar specialization has been hired yet"""
 
-    agent_description = agent_description + "\n\n" + """You are a localized agent so DO NOT comment on the capabilities of the system or other agents. DO NOT make any suggestions or recommendations. This is CRUCIAL. You must ONLY report what you did and the results."""
+    # agent_description = agent_description + "\n\n" + """You are a localized agent so DO NOT comment on the capabilities of the system or other agents. DO NOT make any suggestions or recommendations. This is CRUCIAL. You must ONLY report what you did and the results."""
 
     agent = Role(name = agent_name,
                     instructions = agent_description,
@@ -72,7 +86,7 @@ async def use_hired_agent(agent_name : str = Field(description = "The name of th
     # Find the tools that might be interesting to use for this task
     tool_query = f"""You have been given the following task : `{agent_task}`
 
-Reason about what this task might involve and use the `search_tools` tool to find tools that will be useful for this task.
+Reason about what this task might involve and choose which tools that might be useful using the `search_tools` tool
 
 The manager that hired you has suggested that the following tools might be helpful: `{suggested_tools}`
     """
@@ -87,13 +101,42 @@ The manager that hired you has suggested that the following tools might be helpf
 
     with open(f'tool_steps_{agent_name}.txt', 'w') as f:
         print(tool_metadata, file = f)
+
+    toolset_query = f"""You have been given the following task : `{agent_task}`
+
+You have found that the following tools might be useful for this task: `{found_tool_names}`
+
+Collectively, these tools belong to the toolsets: `{set([AGENT_TOOLS[t]['posix_path'] for t in found_tool_names])}`
+
+Please do the following (1) use the `get_toolset_usage` tool to get the usage of toolsets that these tools belong to and use this information refine which tools are relevant (2) use the `get_tool_usage` tools and decide on a plan for how to use the tools you have chosen.
+
+Do not execute the plan. Rather write out the entire plan in your final complete answer.
+"""
+    toolset_response, toolset_metadata = await agent.acall(toolset_query,
+                                        tools = [get_toolset_usage, get_tool_usage],
+                                        return_metadata=True,
+                                        thoughts_schema = ThoughtsSchema,
+                                        max_loop_count = 10,
+                                        )
+    
+    with open(f'toolset_steps_{agent_name}.txt', 'w') as f:
+        print(toolset_metadata, file = f)
     
     action_query = f"""You have been given the following task : `{agent_task}`
 
-Use the tools that you have already found to complete the task. If you unsure about how to use the tools, use the `get_tool_usage` tool to get information about any other tool.
-"""
+You first searched for tools that might be useful for this task and found the following tools: `{found_tool_names}`
 
-    action_response, action_metadata = await agent.acall(agent_task,
+After reading more documentation you came up with the following: `{toolset_response}`
+
+Now please complete the task you have been given.
+"""
+    agent2 = Role(name = agents[agent_name]._setting.__dict__['name'],
+                    instructions = agents[agent_name]._setting.__dict__['instructions'],
+                    constraints=None,
+                    register_default_events=True,)
+    
+
+    action_response, action_metadata = await agent2.acall(action_query,
                                                          tools = [AGENT_TOOLS[t]['func_ref'] for t in found_tool_names] + [get_tool_usage],
                                                             return_metadata=True,
                                                             thoughts_schema=ThoughtsSchema,
@@ -116,7 +159,7 @@ async def check_completion(project_goal : str, current_response : str, manager :
     
 The current state of the project is the following : `{current_response}`
 
-Has the current state of the project COMPLETELY satified the project goal? 
+Has the current state of the project COMPLETELY satisfied the project goal? 
 If yes, then summarize why the project is complete.
 If no, give a complete description of how the current state falls short and what needs to be done to finish the project. In this description throw away any comments about the system's capabilities or the capabilities of other agents. Only focus on the project completion status.
     """

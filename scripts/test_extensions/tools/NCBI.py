@@ -28,7 +28,6 @@ async def call_api(url: str) -> bytes:
 
 
 
-@schema_tool
 async def get_geo_api_info() -> str:
     """Returns details about the usage of the NCBI Web API for usage of the GEO database for high-throughput gene expression data and other functional genomics datasets"""
 
@@ -52,7 +51,6 @@ Question: What are the details of the GEO dataset with ID 200?
 Answer: The entire dataset details are contained in the json object returned from the query. For example, the dataset files can be downloaded via the ftp link 'ftp://ftp.ncbi.nlm.nih.gov/geo/datasets/GDSnnn/GDS200/'
 """
 
-@schema_tool
 async def get_genomic_api_info() -> str:
     """Returns details about the usage of the NCBI Web API for genomic questions"""
 
@@ -90,7 +88,6 @@ Answer: chr15:91950805-91950932"""
 
     return s
 
-@schema_tool
 async def get_pubmed_api_info() -> str:
     """Returns details about the usage of the NCBI Web API for usage of the PubMed Central (PMC) database. PubMed Central is a free digital repository that offers access to articles on life sciences and biomedical topics. The API offers functionality including searching the PMC database, retrieving article details, and downloading article content."""
 
@@ -131,39 +128,46 @@ Query: Fetch the details of the Pubmed Central article with the ID 7615674
     return s
 
 @schema_tool
-async def pubmed_api(ncbi_query_url : str = Field(description = "The NCBI API to use for this query")) -> str:
-    """Use the PubMed Central tool as specific in the `get_pubmed_api_info` tool. Use that tool before using this one. DO NOT USE AN API KEY."""
+async def pmc_search(ncbi_query_url : str = Field(description = "The NCBI API web url to use for this query")) -> str:
+    """Uses the NCBI web API to search the PubMed Central (pmc) database"""
     query_response = await call_api(ncbi_query_url)
     query_response = query_response.decode()
     return query_response
 
 @schema_tool
-async def ncbi_api_call(ncbi_query_url : str = Field(description = "A url that uses the NCBI web apis to get information relevant to questions and task completion")) -> str:
-    """Use the NCBI Web API to work on tasks that are aided by use of the NCBI databases. Limit your use of this tool ONLY to tools that you have researched using `_info` functions"""
+async def pubmed_search(ncbi_query_url : str = Field(description = "The NCBI API web url to use for this query")) -> str:
+    """Uses the NCBI web API to search the PubMed database"""
     query_response = await call_api(ncbi_query_url)
     query_response = query_response.decode()
     return query_response
 
+# @schema_tool
+# async def ncbi_api_call(ncbi_query_url : str = Field(description = "A url that uses the NCBI web apis to get information relevant to questions and task completion")) -> str:
+#     """Use the NCBI Web API to work on tasks that are aided by use of the NCBI databases. Limit your use of this tool ONLY to tools that you have researched using `_info` functions"""
+#     query_response = await call_api(ncbi_query_url)
+#     query_response = query_response.decode()
+#     return query_response
+
 
 @schema_tool
-async def get_pubmed_central_oa(pmc_id: str = Field(description="The Pubmed Central ID of the article to get e.g. PMC1790863")) -> str:
-    """Checks if the article with the given PubMed Central ID is open access. If it is, returns the ftp link to the article's contents which must be downloaded using another FTP tool. If it is not open access, returns a message indicating that the article is not open access."""
+async def get_pmc_ftp(pmc_id: str = Field(description="The Pubmed Central (pmc) ID of the article to get e.g. PMC1790863. Note that this must be a pmc ID not a PubMed ID as these are two different databases")) -> str:
+    """Gets the ftp link to a PubMed Central (pmc) article's content if the article is open access. If it is not open access, returns a message indicating that the article is not open access."""
     query_url = f"https://www.ncbi.nlm.nih.gov/pmc/utils/oa/oa.fcgi?id={pmc_id}"
     try:
         xml_content = await call_api(query_url)
         xml_content = xml_content.decode()
         root = ET.fromstring(xml_content)
         records = root.findall('.//record')
-        failure_string = "The article is not open access. Are you sure you queried PubMed Central (db=pmc) and not PubMed (db=pubmed)? If you searched db=pubmed, you are searching the wrong database. Here's the xml content of the repsonse:\n" + xml_content
+        failure_string = "I did not find an FTP link which could be for a number of reasons. Here's the xml content of the repsonse:\n" + xml_content
         if records:
             links = [link.get('href') for record in records for link in record.findall('.//link')]
             if len(links) == 1:
-                return f"The article is open access. Here's the only link I could find to download the article's resources:\n{links[0]}"
+                return f"The article is open access and I found a single FTP link for the article's resources:\n{links[0]}"
             elif len(links) == 0:
                 return failure_string
             else:
                 link_list_formatted = '\n'.join(links)
-                return f"The article is open access. I found multiple article resource FTP download links:\n{link_list_formatted}"
+                return f"The article is open access and I found multiple article resource FTP download links:\n{link_list_formatted}"
         else:
             return failure_string
 

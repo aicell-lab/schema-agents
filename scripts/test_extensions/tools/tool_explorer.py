@@ -43,7 +43,7 @@ class SchemaToolVisitor(ast.NodeVisitor):
 async def list_schema_tools(top_directory : str, 
                             exclude_funcs : Set[str] = {}, 
                             exclude_dirs : Set[str] = {}, 
-                            exclude_files : Set[str] = {}) -> List[str]:
+                            exclude_files : Set[str] = {}) -> dict:
     """List all schema tools in the given directory"""
     schema_tools = {}
     path = Path(top_directory)
@@ -83,6 +83,7 @@ async def list_schema_tools(top_directory : str,
                             'func_ref': func_ref,  # Store the function reference,
                             'posix_path' : py_file.as_posix(),
                             'yaml_path' : usage_yaml.as_posix(),
+                            'toolset_usage' : usage_strings.get("toolset_usage", "No toolset usage string provided"),
                             'ast' : t,
                             } 
                         }
@@ -122,28 +123,12 @@ async def create_tool_db(tool_dir,
     db.save_local(save_path)
     return db
 
-tool_chunk ="""({i}) Tool name : {name}
-- Relevant tool description : {docstring}
-- posix path : {posix_path}
-- yaml path : {yaml_path}"""
-results_string = """I found {l} tools that might be helpful to give a hired agent to solve the task:
-{tool_chunks}"""
-
-async def search_tools(query : str, db_path : str) -> str:
-    """Search for tool to solve tasks given a tool database"""
-
-    db = FAISS.load_local(db_path, OpenAIEmbeddings(), allow_dangerous_deserialization=True)
-    results = db.similarity_search(query)
-    tool_chunks = '\n'.join([tool_chunk.format(i = i+1, name = x.metadata['name'], docstring = x.page_content, posix_path = x.metadata['posix_path'], yaml_path = x.metadata['yaml_path']) for i, x in enumerate(results)])
-    rs = results_string.format(l = len(results), tool_chunks = tool_chunks)
-    return rs
-
-def fixed_db_tool_search(fixed_db_path : str):
-    @schema_tool
-    async def wrapper(query : str) -> List[str]:
-        """Search for tool to solve tasks given a tool database"""
-        return await search_tools(query, fixed_db_path)
-    return wrapper
+# def fixed_db_tool_search(fixed_db_path : str):
+#     @schema_tool
+#     async def wrapper(query : str) -> List[str]:
+#         """Search for tool to solve tasks given a tool database"""
+#         return await search_tools(query, fixed_db_path)
+#     return wrapper
 
 @schema_tool
 async def test_tool(name : str = Field(description = "The name of the agent running this tool")) -> str:
