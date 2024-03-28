@@ -86,10 +86,13 @@ async def use_hired_agent(agent_name : str = Field(description = "The name of th
     # Find the tools that might be interesting to use for this task
     tool_query = f"""You have been given the following task : `{agent_task}`
 
-Reason about what this task might involve and choose which tools that might be useful using the `search_tools` tool
+Reason about what this task might involve and search for tools using the `search_tools` tool that might be useful for this task, you can take the manager's suggestions into account but do not rely solely on them.
+DO NOT execute or use any tools you find, just report back the tools that you think might be useful.
+
 
 The manager that hired you has suggested that the following tools might be helpful: `{suggested_tools}`
     """
+
     tool_response, tool_metadata = await agent.acall(tool_query,
                                         tools = [search_tools],
                                         output_schema = UsefulTools,
@@ -108,7 +111,7 @@ You have found that the following tools might be useful for this task: `{found_t
 
 Collectively, these tools belong to the toolsets: `{set([AGENT_TOOLS[t]['posix_path'] for t in found_tool_names])}`
 
-Please do the following (1) use the `get_toolset_usage` tool to get the usage of toolsets that these tools belong to and use this information refine which tools are relevant (2) use the `get_tool_usage` tools and decide on a plan for how to use the tools you have chosen.
+Please do the following (1) use the `get_toolset_usage` tool to get the usage of toolsets that these tools belong to and use this information refine which tools are relevant (2) use the `get_tool_usage` tool and decide on a plan for how to use the tools you have chosen.
 
 Do not execute the plan. Rather write out the entire plan in your final complete answer.
 """
@@ -235,7 +238,9 @@ async def main(project_task : str):
     #                              current_state = initial_state,
     #                              manager_suggestions = manager_suggestions)
     # project_response, project_metadata = await manager.acall(project_state, [hire_agent, use_hired_agent], return_metadata=True)
-    project_response, project_metadata = await manager.acall(project_task, [hire_agent, use_hired_agent], return_metadata=True)
+    project_response, project_metadata = await manager.acall(project_task, [hire_agent, use_hired_agent, check_hired_agents], return_metadata=True)
+    with open(f'project_metadata_initial.txt', 'w') as f:
+        print(project_metadata, file = f)
     completion_res = await check_completion(project_goal = project_task, current_response = project_response, manager = manager)
 
     manager_iterations = 0
@@ -245,7 +250,9 @@ async def main(project_task : str):
         # manager_suggestions, _ = await manager.acall(project_task, [search_tools], output_schema = ManagerSuggestions, return_metadata=True)
         manager_suggestions = await get_manager_suggestions(project_task, completion_res.summary, manager, troubleshooter)
         project_state = ProjectState(project_goal = project_task, current_state = completion_res.summary, manager_suggestions = manager_suggestions)
-        project_response, project_metadata = await manager.acall(project_state, [hire_agent, use_hired_agent], return_metadata=True)
+        project_response, project_metadata = await manager.acall(project_state, [hire_agent, use_hired_agent, check_hired_agents], return_metadata=True)
+        with open(f'project_metadata_{manager_iterations}.txt', 'w') as f:
+            print(project_metadata, file = f)
         completion_res = await check_completion(project_goal = project_task, current_response = project_response, manager = manager)
         manager_iterations += 1
 
