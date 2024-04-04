@@ -12,16 +12,8 @@ import tempfile
 import re
 import json
 
-from pydantic import BaseModel
-from schema_agents.utils.singleton import Singleton
-from schema_agents.utils.token_counter import (
-    TOKEN_COSTS,
-    count_message_tokens,
-    count_string_tokens,
-)
-from schema_agents.utils.common import (
-    EventBus,
-)
+from pydantic import BaseModel, create_model
+
 
 
 def convert_key_name(key_name):
@@ -57,7 +49,7 @@ def apply_patch(original_text, patch_text):
     result = subprocess.run(['patch', original_path, patch_path], capture_output=True)
 
     # Read the patched content from the original file
-    with open(original_path, 'r') as file:
+    with open(original_path, 'r', encoding="utf-8") as file:
         patched_text = file.read()
 
     # Clean up the temporary files
@@ -127,9 +119,24 @@ def schema_to_function(schema: BaseModel):
     ), "`title` is a reserved keyword and cannot be used as a field name."
     schema_dict = schema.schema()
     remove_a_key(schema_dict, "title")
+    remove_a_key(schema_dict, "description")
 
     return {
         "name": schema.__name__,
         "description": schema.__doc__,
         "parameters": schema_dict,
     }
+
+
+def dict_to_pydantic_model(name: str, dict_def: dict, doc: str = None):
+    fields = {}
+    for field_name, value in dict_def.items():
+        if isinstance(value, tuple):
+            fields[field_name] = value
+        elif isinstance(value, dict):
+            fields[field_name] = (dict_to_pydantic_model(f"{name}_{field_name}", value), ...)
+        else:
+            raise ValueError(f"Field {field_name}:{value} has invalid syntax")
+    model = create_model(name, **fields)
+    model.__doc__ = doc
+    return model

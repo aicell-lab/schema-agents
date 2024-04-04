@@ -10,17 +10,22 @@ ref3: https://github.com/hwchase17/langchain/blob/master/langchain/chat_models/o
 """
 import tiktoken
 from math import ceil
+import json
 
 TOKEN_COSTS = {
     "gpt-3.5-turbo": {"prompt": 0.0015, "completion": 0.002},
     "gpt-3.5-turbo-instruct": {"prompt": 0.0015, "completion": 0.002},
+    "gpt-3.5-turbo-0125": {"prompt": 0.0005, "completion": 0.0015},
     "gpt-3.5-turbo-1106": {"prompt": 0.0010, "completion": 0.002},
     "gpt-3.5-turbo-0301": {"prompt": 0.0015, "completion": 0.002},
     "gpt-3.5-turbo-0613": {"prompt": 0.0015, "completion": 0.002},
     "gpt-3.5-turbo-16k": {"prompt": 0.003, "completion": 0.004},
     "gpt-3.5-turbo-16k-0613": {"prompt": 0.003, "completion": 0.004},
-    "gpt-4-1106-vision-preview": {"prompt": 0.01, "completion": 0.03},
+    "gpt-4-turbo-preview": {"prompt": 0.01, "completion": 0.03},
+    "gpt-4-0125-preview": {"prompt": 0.01, "completion": 0.03},
     "gpt-4-1106-preview": {"prompt": 0.01, "completion": 0.03},
+    "gpt-4-vision-preview": {"prompt": 0.01, "completion": 0.03},
+    "gpt-4-1106-vision-preview": {"prompt": 0.01, "completion": 0.03},
     "gpt-4-0314": {"prompt": 0.03, "completion": 0.06},
     "gpt-4": {"prompt": 0.03, "completion": 0.06},
     "gpt-4-32k": {"prompt": 0.06, "completion": 0.12},
@@ -33,6 +38,7 @@ TOKEN_COSTS = {
 TOKEN_MAX = {
     "gpt-3.5-turbo": 4096,
     "gpt-3.5-turbo-instruct": 4096,
+    "gpt-3.5-turbo-0125": 16384,
     "gpt-3.5-turbo-1106": 16384,
     "gpt-3.5-turbo-0301": 4096,
     "gpt-3.5-turbo-0613": 4096,
@@ -43,7 +49,10 @@ TOKEN_MAX = {
     "gpt-4-32k": 32768,
     "gpt-4-32k-0314": 32768,
     "gpt-4-0613": 8192,
+    "gpt-4-turbo-preview": 128000,
+    "gpt-4-0125-preview": 128000,
     "gpt-4-1106-preview": 128000,
+    "gpt-4-vision-preview": 128000,
     "gpt-4-1106-vision-preview": 128000,
     "text-embedding-ada-002": 8192,
 }
@@ -83,7 +92,7 @@ def num_tokens_from_functions(functions, encoding):
                                 function_tokens += 3
                                 function_tokens += len(encoding.encode(o))
                         else:
-                            print(f"Warning: not supported field {field}")
+                            print(f"Warning (token count): not supported field {field}")
                 function_tokens += 11
 
         num_tokens += function_tokens
@@ -100,6 +109,7 @@ def count_message_tokens(messages, model="gpt-3.5-turbo-0613", functions=None):
         encoding = tiktoken.get_encoding("cl100k_base")
     if model in {
         "gpt-3.5-turbo-instruct",
+        "gpt-3.5-turbo-0125",
         "gpt-3.5-turbo-1106",
         "gpt-3.5-turbo-0613",
         "gpt-3.5-turbo-16k-0613",
@@ -107,7 +117,10 @@ def count_message_tokens(messages, model="gpt-3.5-turbo-0613", functions=None):
         "gpt-4-32k-0314",
         "gpt-4-0613",
         "gpt-4-32k-0613",
+        "gpt-4-turbo-preview",
+        "gpt-4-0125-preview",
         "gpt-4-1106-preview",
+        "gpt-4-vision-preview",
         "gpt-4-1106-vision-preview",
     }:
         tokens_per_message = 3
@@ -129,6 +142,8 @@ def count_message_tokens(messages, model="gpt-3.5-turbo-0613", functions=None):
     for message in messages:
         num_tokens += tokens_per_message
         for key, value in message.items():
+            if isinstance(value, (dict, list)):
+                value = json.dumps(value)
             num_tokens += len(encoding.encode(value))
             if key == "name":
                 num_tokens += tokens_per_name

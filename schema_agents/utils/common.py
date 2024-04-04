@@ -21,6 +21,10 @@ def check_cmd_exists(command) -> int:
     return result
 
 
+class UnexpectedStringOutputError(Exception):
+    pass
+
+
 class NoMoneyException(Exception):
     """Raised when the operation cannot be completed due to insufficient funds"""
 
@@ -131,11 +135,11 @@ class EventBus:
     async def stream_callback(self, message):
         if message.type == "function_call":
             if message.status == "in_progress":
-                print(message.arguments, end="")
+                print(message.arguments, end="", flush=True)
             else:
-                print(f'\nGenerating {message.name} ({message.status}): {message.arguments}')
+                print(f'\nGenerating {message.name} ({message.status}): {message.arguments}', flush=True)
         elif message.type == "text":
-            print(message.content, end="")
+            print(message.content, end="", flush=True)
 
     def register_default_events(self):
         self.on("stream", self.stream_callback)

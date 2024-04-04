@@ -10,8 +10,8 @@ from pathlib import Path
 from typing import Optional
 
 import faiss
-from langchain.embeddings import OpenAIEmbeddings
-from langchain.vectorstores import FAISS
+from langchain_community.embeddings import OpenAIEmbeddings
+from langchain_community.vectorstores import FAISS
 
 from schema_agents.memory.base_store import LocalStore
 from schema_agents.logs import logger
