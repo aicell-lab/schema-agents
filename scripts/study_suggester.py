@@ -9,6 +9,7 @@ from xml.etree import ElementTree as ET
 import re
 from collections import defaultdict
 from typing import Union
+import os
 
 class StructuredQuery(BaseModel):
     """A query formatted to search the NCBI PubMed Database inspired by the user's input query"""
@@ -80,7 +81,9 @@ async def get_relevant_texts(structured_query: StructuredQuery, role: Role = Non
 
 async def scrape_paper_info(paper_fetcher_url: PaperFetcherUrl, role: Role = None) -> RelevantTexts:
     """Takes the paper fetcher url, searches the PubMed database for the papers and scrapes relevant paper information"""
-    search_results_file = "./study_suggester_intermediate_files/pubmed_search_results.xml"
+    search_results_dir = "./study_suggester_intermediate_files"
+    os.makedirs(search_results_dir, exist_ok=True)
+    search_results_file = os.path.join(search_results_dir, "pubmed_search_results.xml")
     abstract_search_results = await submit_request(paper_fetcher_url.query_url, out_file = search_results_file)
     paper_info = await extract_article_info(abstract_search_results)
     ap = {}
@@ -94,7 +97,8 @@ async def scrape_paper_info(paper_fetcher_url: PaperFetcherUrl, role: Role = Non
         authors = ap['authors'], 
         affiliations=ap['affiliations'], 
         abstracts=ap['abstract'])
-    with open("./study_suggester_intermediate_files/relevant_papers.txt", 'w') as f:
+    papers_file = os.path.join(search_results_dir, "relevant_papers.txt")
+    with open(papers_file, 'w') as f:
         print(f"{relevant_texts.titles}\n\n", file = f)
         print(f"{relevant_texts.authors}\n\n", file = f)
         print(f"{relevant_texts.affiliations}\n\n", file = f)
