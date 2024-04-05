@@ -115,11 +115,10 @@ def remove_a_key(d, remove_key):
 def schema_to_function(schema: BaseModel):
     assert schema.__doc__, f"{schema.__name__} is missing a docstring."
     assert (
-        "title" not in schema.__fields__.keys()
+        "title" not in schema.model_fields.keys()
     ), "`title` is a reserved keyword and cannot be used as a field name."
-    schema_dict = schema.schema()
+    schema_dict = schema.model_json_schema()
     remove_a_key(schema_dict, "title")
-    remove_a_key(schema_dict, "description")
 
     return {
         "name": schema.__name__,
