@@ -6,4 +6,5 @@
 @File    : llm.py
 """
 
-from schema_agents.provider.openai_api import OpenAIGPTAPI as LLM
+from schema_agents.provider.openai_api import OpenAIGPTAPI
+from schema_agents.provider.ollama_api import OllamaAPI
