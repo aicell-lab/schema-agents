@@ -268,6 +268,7 @@ class OpenAIGPTAPI(BaseGPTAPI, RateLimiter):
                 full_reply_content['system_fingerprint'] = raw_chunk.system_fingerprint
             _msg = ""
             for _tool_call in tool_calls.values():
+                del _tool_call['index']
                 func_call = _tool_call['function']
                 _msg += f"{func_call['name']}({func_call['arguments']})\n"
             tools = kwargs["tools"]
