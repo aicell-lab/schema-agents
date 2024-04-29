@@ -1,0 +1,394 @@
+{
+    "steps": [
+        {
+            "name": "Document Analysis",
+            "agent": {
+                "name": "Document Analyst",
+                "instructions": "Read and summarize the scientific paper, highlighting the main findings, methodologies, and any specific requirements (software, data, etc.) needed to reproduce the results."
+            },
+            "input_schema": {
+                "class_name": "ScientificPaper",
+                "class_description": "A document detailing the findings, methodologies, and data of a scientific research project.",
+                "fields": [
+                    {
+                        "field_name": "title",
+                        "field_type": "string",
+                        "field_description": "The title of the scientific paper."
+                    },
+                    {
+                        "field_name": "authors",
+                        "field_type": "list",
+                        "field_description": "A list of authors who contributed to the paper."
+                    },
+                    {
+                        "field_name": "abstract",
+                        "field_type": "string",
+                        "field_description": "A brief summary of the research findings and methodologies."
+                    },
+                    {
+                        "field_name": "publication_date",
+                        "field_type": "date",
+                        "field_description": "The date when the paper was published."
+                    },
+                    {
+                        "field_name": "journal",
+                        "field_type": "string",
+                        "field_description": "The name of the journal where the paper was published."
+                    },
+                    {
+                        "field_name": "doi",
+                        "field_type": "string",
+                        "field_description": "The digital object identifier for the paper, providing a permanent link."
+                    }
+                ]
+            },
+            "output_schema": {
+                "class_name": "SummaryReport",
+                "class_description": "A document summarizing the main findings, methodologies, and specific requirements needed to reproduce the results of the scientific paper.",
+                "fields": [
+                    {
+                        "field_name": "title",
+                        "field_type": "string",
+                        "field_description": "The title of the scientific paper."
+                    },
+                    {
+                        "field_name": "authors",
+                        "field_type": "string",
+                        "field_description": "The names of the authors of the scientific paper."
+                    },
+                    {
+                        "field_name": "abstract",
+                        "field_type": "string",
+                        "field_description": "A brief summary of the scientific paper."
+                    },
+                    {
+                        "field_name": "key_findings",
+                        "field_type": "string",
+                        "field_description": "The main findings of the scientific paper."
+                    },
+                    {
+                        "field_name": "methodologies",
+                        "field_type": "string",
+                        "field_description": "The methodologies used in the scientific paper."
+                    },
+                    {
+                        "field_name": "requirements",
+                        "field_type": "string",
+                        "field_description": "Specific requirements needed to reproduce the results."
+                    }
+                ]
+            }
+        },
+        {
+            "name": "Methodology Review",
+            "agent": {
+                "name": "Research Methodologist",
+                "instructions": "Review the methodologies section summarized by the Document Analyst to ensure understanding of the procedures and identify any potential challenges in reproducing the results."
+            },
+            "input_schema": {
+                "class_name": "SummaryReport",
+                "class_description": "A document summarizing the main findings, methodologies, and specific requirements needed to reproduce the results of the scientific paper.",
+                "fields": [
+                    {
+                        "field_name": "title",
+                        "field_type": "string",
+                        "field_description": "The title of the scientific paper."
+                    },
+                    {
+                        "field_name": "authors",
+                        "field_type": "string",
+                        "field_description": "The names of the authors of the scientific paper."
+                    },
+                    {
+                        "field_name": "abstract",
+                        "field_type": "string",
+                        "field_description": "A brief summary of the scientific paper."
+                    },
+                    {
+                        "field_name": "key_findings",
+                        "field_type": "string",
+                        "field_description": "The main findings of the scientific paper."
+                    },
+                    {
+                        "field_name": "methodologies",
+                        "field_type": "string",
+                        "field_description": "The methodologies used in the scientific paper."
+                    },
+                    {
+                        "field_name": "requirements",
+                        "field_type": "string",
+                        "field_description": "Specific requirements needed to reproduce the results."
+                    }
+                ]
+            },
+            "output_schema": {
+                "class_name": "MethodologyInsights",
+                "class_description": "A document providing insights into the methodologies, including understanding of procedures and identification of potential challenges in reproducing the results.",
+                "fields": [
+                    {
+                        "field_name": "title",
+                        "field_type": "string",
+                        "field_description": "The title of the document."
+                    },
+                    {
+                        "field_name": "author",
+                        "field_type": "string",
+                        "field_description": "The name of the author or authors of the document."
+                    },
+                    {
+                        "field_name": "date",
+                        "field_type": "string",
+                        "field_description": "The publication date of the document."
+                    },
+                    {
+                        "field_name": "summary",
+                        "field_type": "string",
+                        "field_description": "A brief summary of the document's content."
+                    },
+                    {
+                        "field_name": "methodology_overview",
+                        "field_type": "string",
+                        "field_description": "A detailed description of the methodologies used."
+                    },
+                    {
+                        "field_name": "challenges_identified",
+                        "field_type": "string",
+                        "field_description": "A list of potential challenges in reproducing the results."
+                    },
+                    {
+                        "field_name": "recommendations",
+                        "field_type": "string",
+                        "field_description": "Recommendations for overcoming the identified challenges."
+                    }
+                ]
+            }
+        },
+        {
+            "name": "Data Preparation",
+            "agent": {
+                "name": "Data Scientist",
+                "instructions": "Acquire or simulate the necessary data as described in the paper. Prepare the data for analysis, following the methodologies outlined by the Research Methodologist."
+            },
+            "input_schema": {
+                "class_name": "MethodologyInsights",
+                "class_description": "A document providing insights into the methodologies, including understanding of procedures and identification of potential challenges in reproducing the results.",
+                "fields": [
+                    {
+                        "field_name": "title",
+                        "field_type": "string",
+                        "field_description": "The title of the document."
+                    },
+                    {
+                        "field_name": "author",
+                        "field_type": "string",
+                        "field_description": "The name of the author or authors of the document."
+                    },
+                    {
+                        "field_name": "date",
+                        "field_type": "string",
+                        "field_description": "The publication date of the document."
+                    },
+                    {
+                        "field_name": "summary",
+                        "field_type": "string",
+                        "field_description": "A brief summary of the document's content."
+                    },
+                    {
+                        "field_name": "methodology_overview",
+                        "field_type": "string",
+                        "field_description": "A detailed description of the methodologies used."
+                    },
+                    {
+                        "field_name": "challenges_identified",
+                        "field_type": "string",
+                        "field_description": "A list of potential challenges in reproducing the results."
+                    },
+                    {
+                        "field_name": "recommendations",
+                        "field_type": "string",
+                        "field_description": "Recommendations for overcoming the identified challenges."
+                    }
+                ]
+            },
+            "output_schema": {
+                "class_name": "PreparedData",
+                "class_description": "Data that has been acquired or simulated and prepared for analysis, following the methodologies outlined.",
+                "fields": [
+                    {
+                        "field_name": "source",
+                        "field_type": "str",
+                        "field_description": "The origin of the data, whether it's from a real-world dataset, simulation, or other sources."
+                    },
+                    {
+                        "field_name": "preparation_method",
+                        "field_type": "str",
+                        "field_description": "A brief description of how the data was prepared, including any cleaning, normalization, or transformation steps."
+                    },
+                    {
+                        "field_name": "data_format",
+                        "field_type": "str",
+                        "field_description": "The format in which the data is stored, such as CSV, JSON, or a database format."
+                    },
+                    {
+                        "field_name": "usage_context",
+                        "field_type": "str",
+                        "field_description": "The intended use of the data, such as for training a machine learning model, statistical analysis, or visualization."
+                    },
+                    {
+                        "field_name": "accessibility",
+                        "field_type": "str",
+                        "field_description": "Information on how the data can be accessed, including any restrictions or requirements."
+                    }
+                ]
+            }
+        },
+        {
+            "name": "Software Development",
+            "agent": {
+                "name": "Software Engineer",
+                "instructions": "Develop or configure the necessary software tools, scripts, or environments needed to reproduce the experiments or analyses as described in the paper. Collaborate with the Data Scientist to ensure the software meets the data analysis needs."
+            },
+            "input_schema": {
+                "class_name": "PreparedData",
+                "class_description": "Data that has been acquired or simulated and prepared for analysis, following the methodologies outlined.",
+                "fields": [
+                    {
+                        "field_name": "source",
+                        "field_type": "str",
+                        "field_description": "The origin of the data, whether it's from a real-world dataset, simulation, or other sources."
+                    },
+                    {
+                        "field_name": "preparation_method",
+                        "field_type": "str",
+                        "field_description": "A brief description of how the data was prepared, including any cleaning, normalization, or transformation steps."
+                    },
+                    {
+                        "field_name": "data_format",
+                        "field_type": "str",
+                        "field_description": "The format in which the data is stored, such as CSV, JSON, or a database format."
+                    },
+                    {
+                        "field_name": "usage_context",
+                        "field_type": "str",
+                        "field_description": "The intended use of the data, such as for training a machine learning model, statistical analysis, or visualization."
+                    },
+                    {
+                        "field_name": "accessibility",
+                        "field_type": "str",
+                        "field_description": "Information on how the data can be accessed, including any restrictions or requirements."
+                    }
+                ]
+            },
+            "output_schema": {
+                "class_name": "SoftwareTools",
+                "class_description": "Software tools, scripts, or environments developed or configured to reproduce the experiments or analyses as described in the paper.",
+                "fields": [
+                    {
+                        "field_name": "name",
+                        "field_type": "string",
+                        "field_description": "The name of the software tool, script, or environment."
+                    },
+                    {
+                        "field_name": "version",
+                        "field_type": "string",
+                        "field_description": "The version of the software tool, if applicable."
+                    },
+                    {
+                        "field_name": "description",
+                        "field_type": "string",
+                        "field_description": "A brief description of the software tool, script, or environment and its purpose."
+                    },
+                    {
+                        "field_name": "url",
+                        "field_type": "string",
+                        "field_description": "The URL where the software tool, script, or environment can be accessed or downloaded."
+                    },
+                    {
+                        "field_name": "license",
+                        "field_type": "string",
+                        "field_description": "The license under which the software tool, script, or environment is distributed."
+                    }
+                ]
+            }
+        },
+        {
+            "name": "Quality Assurance",
+            "agent": {
+                "name": "Quality Assurance Specialist",
+                "instructions": "Verify the accuracy of the reproduced results by comparing them with the results reported in the paper. Ensure that all steps of the reproduction process are documented and can be followed by others."
+            },
+            "input_schema": {
+                "class_name": "SoftwareTools",
+                "class_description": "Software tools, scripts, or environments developed or configured to reproduce the experiments or analyses as described in the paper.",
+                "fields": [
+                    {
+                        "field_name": "name",
+                        "field_type": "string",
+                        "field_description": "The name of the software tool, script, or environment."
+                    },
+                    {
+                        "field_name": "version",
+                        "field_type": "string",
+                        "field_description": "The version of the software tool, if applicable."
+                    },
+                    {
+                        "field_name": "description",
+                        "field_type": "string",
+                        "field_description": "A brief description of the software tool, script, or environment and its purpose."
+                    },
+                    {
+                        "field_name": "url",
+                        "field_type": "string",
+                        "field_description": "The URL where the software tool, script, or environment can be accessed or downloaded."
+                    },
+                    {
+                        "field_name": "license",
+                        "field_type": "string",
+                        "field_description": "The license under which the software tool, script, or environment is distributed."
+                    }
+                ]
+            },
+            "output_schema": {
+                "class_name": "ReproductionReport",
+                "class_description": "A document verifying the accuracy of the reproduced results and ensuring that the reproduction process is well documented and can be followed by others.",
+                "fields": [
+                    {
+                        "field_name": "title",
+                        "field_type": "string",
+                        "field_description": "The title of the report."
+                    },
+                    {
+                        "field_name": "originalStudyName",
+                        "field_type": "string",
+                        "field_description": "The name of the original study or experiment being reproduced."
+                    },
+                    {
+                        "field_name": "methodsDescription",
+                        "field_type": "string",
+                        "field_description": "A detailed description of the methods used in the reproduction process."
+                    },
+                    {
+                        "field_name": "resultsSummary",
+                        "field_type": "string",
+                        "field_description": "A summary of the results obtained from the reproduction process."
+                    },
+                    {
+                        "field_name": "resultsComparison",
+                        "field_type": "string",
+                        "field_description": "An analysis comparing the reproduced results with the original study's results."
+                    },
+                    {
+                        "field_name": "conclusions",
+                        "field_type": "string",
+                        "field_description": "Conclusions drawn from the reproduction process and its outcomes."
+                    },
+                    {
+                        "field_name": "recommendations",
+                        "field_type": "string",
+                        "field_description": "Any recommendations for future research based on the reproduction findings."
+                    }
+                ]
+            }
+        }
+    ]
+}
