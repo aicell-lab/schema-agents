@@ -54,9 +54,12 @@ class Config(metaclass=Singleton):
             if not self.openai_proxy:
                 logger.info("Set OPENAI_API_BASE in case of network issues")
 
+        self.gemini_api_key = self._get("GEMINI_API_KEY")
+        self.gemini_proxy = self._get("GEMINI_PROXY") or self.global_proxy
+        self.gemini_api_rpm = self._get("GEMINI_RPM", 2)
         self.openai_api_type = self._get("OPENAI_API_TYPE")
         self.openai_api_version = self._get("OPENAI_API_VERSION")
-        self.openai_api_rpm = self._get("RPM", 3)
+        self.openai_api_rpm = self._get("OPENAI_RPM", 3)
         self.openai_api_model = self._get("OPENAI_API_MODEL", "gpt-4-turbo-preview")
         self.openai_seed = self._get("OPENAI_SEED", 42)
         self.openai_temperature = self._get("OPENAI_TEMPERATURE", 0)
@@ -64,6 +67,7 @@ class Config(metaclass=Singleton):
         self.openai_logprobs = self._get("OPENAI_LOGPROBS")
         self.openai_top_logprobs = self._get("OPENAI_TOP_LOGPROBS")
         self.openai_timeout = self._get("OPENAI_TIMEOUT", 15)
+        self.gemini_api_model = self._get("GEMINI_API_MODEL", "gemini-pro")
         self.max_tokens_rsp = self._get("MAX_TOKENS", 2048)
         self.deployment_name = self._get("DEPLOYMENT_NAME")
         self.deployment_id = self._get("DEPLOYMENT_ID")

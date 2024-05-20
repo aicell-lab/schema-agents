@@ -21,7 +21,8 @@ dependencies = [
     "openapi-pydantic",
     "makefun>=1.15.2",
     "langchain>=0.1.10",
-    "langchain-community>=0.0.25"
+    "langchain-community>=0.0.25",
+    "google-generativeai",
 ]
 
 [tool.setuptools]
