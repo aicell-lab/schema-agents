@@ -103,7 +103,7 @@ class GeminiGenerativeModel(GenerativeModel):
 
 class GeminiAPI(BaseGPTAPI, RateLimiter):
     """
-    Ollama API client.
+    Gemini API client.
     """
     def __init__(self, model=None, seed=None, temperature=None, timeout=None, rpm=None):
         self.__init_gemini(CONFIG)
