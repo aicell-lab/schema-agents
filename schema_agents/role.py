@@ -17,7 +17,7 @@ from pydantic.fields import FieldInfo
 
 from schema_agents.logs import logger
 from schema_agents.utils import parse_special_json, schema_to_function
-from schema_agents.llm import LLM
+from schema_agents.llm import OpenAIGPTAPI, OllamaAPI, GeminiAPI
 from schema_agents.schema import Message, RoleSetting, Session
 from schema_agents.memory.long_term_memory import LongTermMemory
 from schema_agents.utils import dict_to_pydantic_model
@@ -77,9 +77,17 @@ class Role:
         event_bus: EventBus = None,
         actions: list[Callable] = None,
         register_default_events: bool = False,
+        backend="openai",
         **kwargs,
     ):
-        self._llm = LLM(**kwargs)
+        if backend == "openai":
+            self._llm = OpenAIGPTAPI(**kwargs)
+        elif backend == "ollama":
+            self._llm = OllamaAPI(**kwargs)
+        elif backend == "gemini":
+            self._llm = GeminiAPI(**kwargs)
+        else:
+            raise ValueError(f"Invalid backend: {backend}")
         self._setting = RoleSetting(
             name=name,
             profile=profile,
