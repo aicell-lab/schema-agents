@@ -16,7 +16,7 @@ class SoftwareRequirementDocument(BaseModel):
 
 @pytest.mark.asyncio
 async def test_respond_gemini():
-    role = Role(instructions="You are Bob, a software engineer, please write a Software Requirement Document.", 
-                backend="openai")
-    responses = await role.aask("Write hello world in Python, use function SoftwareRequirementDocument", SoftwareRequirementDocument)
+    role = Role(instructions="You are Bob, a software engineer, you have access to function SoftwareRequirementDocument.", 
+                backend="gemini")
+    responses = await role.aask(", write a Software Requirement Document for a simple software that prints 'Hello World' in Python, use function SoftwareRequirementDocument", SoftwareRequirementDocument)
     assert responses
