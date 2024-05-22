@@ -74,12 +74,25 @@ def create_schema(entity, definitions=None):
     # Handle anyOf types
     if 'anyOf' in entity:
         schemas = [create_schema(sub_entity, definitions) for sub_entity in entity['anyOf']]
+        
+        # Check for the specific case where anyOf contains two elements and one of them is null
+        if len(schemas) == 2:
+            types = [schema.type_ for schema in schemas]
+            if glm.Type.TYPE_UNSPECIFIED in types:
+                types.remove(glm.Type.TYPE_UNSPECIFIED)
+                return glm.Schema(
+                    type_=types[0],
+                    description=entity.get('description'),
+                    nullable=True
+                )
+        
         # Combine all schemas into one with additional description if available
         return glm.Schema(
             type_=glm.Type.OBJECT,
             properties={f"option_{i}": schema for i, schema in enumerate(schemas)},
             description=entity.get('description', "Any of the following schemas")
         )
+
 
     # Handle array types with nested items
     if entity.get('type') == 'array':
@@ -98,7 +111,7 @@ def create_schema(entity, definitions=None):
         nullable = schema_type is None or schema_type == 'null'
         
         if schema_type is None or schema_type == 'null':
-            schema_type = 'STRING'  # Defaulting to STRING if type is null
+            schema_type = 'TYPE_UNSPECIFIED'  # Defaulting to STRING if type is null
         else:
             schema_type = schema_type.upper()
         
