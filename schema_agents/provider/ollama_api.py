@@ -29,8 +29,6 @@ from schema_agents.utils.token_counter import (
 from schema_agents.utils.common import EventBus
 from contextvars import copy_context
 from schema_agents.provider.openai_api import RateLimiter, CostManager
-import ollama
-
 
 class OllamaAPI(BaseGPTAPI, RateLimiter):
     """
@@ -48,6 +46,7 @@ class OllamaAPI(BaseGPTAPI, RateLimiter):
         logger.info(f"OpenAI API model: {self.model}")
     
     def __init_ollama(self, config):
+        import ollama
         self.client = ollama.AsyncClient(host="http://localhost:11434")
         self.rpm = int(config.get("RPM", 10))
 

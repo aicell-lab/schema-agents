@@ -30,7 +30,9 @@ from schema_agents.utils.token_counter import (
     get_max_completion_tokens,
 )
 from schema_agents.utils.common import EventBus
+from schema_agents.schema import StreamEvent
 from schema_agents.provider.openai_api import RateLimiter
+from schema_agents.utils.common import EventBus, current_session
 from contextvars import copy_context
 import google.generativeai as genai
 from google.ai import generativelanguage as glm
@@ -42,30 +44,74 @@ from google.generativeai.types.generation_types import (
     GenerateContentResponse,
     GenerationConfig,
 )
+import textwrap
 
 
+# Define a function to resolve references
+def resolve_ref(ref, definitions):
+    ref_path = ref.lstrip('#/$defs').split('/')
+    ref_schema = definitions
+    for part in ref_path:
+        ref_schema = ref_schema.get(part)
+        if ref_schema is None:
+            raise ValueError(f"Reference {ref} cannot be resolved.")
+    return ref_schema
 
-def create_schema(entity):
+
+def create_schema(entity, definitions=None):
     """
     Recursive function to create a glm.Schema object from a dictionary describing an entity.
     Handles nested objects and arrays.
     """
+    if definitions is None:
+        definitions = {}
+
+    # Handle $ref
+    if '$ref' in entity:
+        ref_entity = resolve_ref(entity['$ref'], definitions)
+        return create_schema(ref_entity, definitions)
+
+    # Handle anyOf types
+    if 'anyOf' in entity:
+        schemas = [create_schema(sub_entity, definitions) for sub_entity in entity['anyOf']]
+        # Combine all schemas into one with additional description if available
+        return glm.Schema(
+            type_=glm.Type.OBJECT,
+            properties={f"option_{i}": schema for i, schema in enumerate(schemas)},
+            description=entity.get('description', "Any of the following schemas")
+        )
+
     # Handle array types with nested items
     if entity.get('type') == 'array':
-        item_schema = create_schema(entity['items'])
-        return glm.Schema(type=glm.Type.ARRAY, items=item_schema)
+        item_schema = create_schema(entity['items'], definitions)
+        return glm.Schema(type_=glm.Type.ARRAY, items=item_schema, description=entity.get('description'))
 
     # Handle object types with properties
     elif entity.get('type') == 'object':
-        properties = {key: create_schema(value) for key, value in entity['properties'].items()}
+        properties = {key: create_schema(value, definitions) for key, value in entity['properties'].items()}
         required_fields = entity.get('required', [])
-        return glm.Schema(type=glm.Type.OBJECT, properties=properties, required=required_fields)
+        return glm.Schema(type_=glm.Type.OBJECT, properties=properties, required=required_fields, description=entity.get('description'))
 
-    # Handle basic types with potential default values
+    # Handle basic types with potential nullable values
     else:
-        schema = glm.Schema(type=getattr(glm.Type, entity['type'].upper()))
-        # if 'default' in entity:
-        #     schema.default = entity['default']
+        schema_type = entity.get('type')
+        nullable = schema_type is None or schema_type == 'null'
+        
+        if schema_type is None or schema_type == 'null':
+            schema_type = 'STRING'  # Defaulting to STRING if type is null
+        else:
+            schema_type = schema_type.upper()
+        
+        try:
+            glm_type = getattr(glm.Type, schema_type)
+        except AttributeError:
+            raise ValueError(f"Unsupported type: {schema_type}")
+
+        schema = glm.Schema(
+            type_=glm_type, 
+            description=entity.get('description'), 
+            nullable=nullable
+        )
         return schema
 
 def json_schema_to_glm_function(schema_dict):
@@ -74,8 +120,12 @@ def json_schema_to_glm_function(schema_dict):
     """
     function_name = schema_dict['name']
     function_description = schema_dict['description']
+    definitions = schema_dict['parameters'].get('$defs', {})
     # The parameters are nested under "parameters" key
-    parameters_schema = create_schema(schema_dict['parameters'])
+    parameters_schema = create_schema(schema_dict['parameters'], definitions)
+
+    if isinstance(parameters_schema, dict) and 'anyOf' in parameters_schema:
+        raise ValueError("anyOf schemas are not directly supported in function parameters.")
 
     function_declaration = glm.FunctionDeclaration(
         name=function_name,
@@ -84,6 +134,7 @@ def json_schema_to_glm_function(schema_dict):
     )
 
     return function_declaration
+
 
 
 class GeminiGenerativeModel(GenerativeModel):
@@ -144,6 +195,8 @@ class GeminiAPI(BaseGPTAPI, RateLimiter):
                 role = msg.get("role")
                 if role == "system":
                     role = "user"
+                if role == "function":
+                    role = "user"
                 if "parts" not in msg.keys():
                     content = msg.get("content")
                     msg = {"role": role, "parts": [content]}
@@ -178,12 +231,24 @@ class GeminiAPI(BaseGPTAPI, RateLimiter):
         print(f"prompt_tokens: {prompt_tokens}, completion_tokens: {completion_tokens}")
         # self._cost_manager.update_cost(prompt_tokens, completion_tokens, self.model)
         
-    async def _achat_completion_stream(self, messages: list[dict], functions: List[Dict[str, Any]]=None, function_call: Union[str, Dict[str, str]]=None, event_bus: EventBus=None):
+    async def _achat_completion_stream(self, messages: list[dict], event_bus: EventBus=None, raise_for_string_output=False, **kwargs) -> str:
         """Stream the completion of messages."""
         messages = self.format_msg(messages)
+        function_call = kwargs.get("function_call")
+        if function_call is None:
+            tool_choice = kwargs.get("tool_choice")
+            if tool_choice is not None:
+                function_call = tool_choice
         func_call = {}
         function_call_detected = False
         tools=[]
+        query_id = ''.join(random.choices(string.ascii_lowercase + string.digits, k=8))
+        session = current_session.get() if current_session in copy_context() else None
+        functions=kwargs.get("functions")
+        if functions is None:
+            ts = kwargs.get("tools")
+            if ts is not None:
+                functions = [tool['function'] for tool in ts]
         # Specify a function declaration and parameters for an API request
         for function in functions:
             function_declaration = json_schema_to_glm_function(function)
@@ -210,6 +275,8 @@ class GeminiAPI(BaseGPTAPI, RateLimiter):
                     function_call_detected = True
                     if "name" in fc_content and fc_content["name"]:
                         func_call["name"] = fc_content["name"]
+                        if event_bus:
+                            event_bus.emit("stream", StreamEvent(type="function_call", query_id=query_id, session=session, name=func_call["name"], arguments=func_call.get("arguments", ""), status="start"))
                     if "args" in fc_content:
                         if "arguments" not in func_call:
                             func_call["arguments"] = ""
@@ -225,7 +292,10 @@ class GeminiAPI(BaseGPTAPI, RateLimiter):
             print("\n")
 
         if function_call_detected:
-            full_reply_content = {"type": "function_call", "function_call": func_call}
+            if kwargs.get("tools"):
+                full_reply_content = {"type": "tool_calls", "tool_calls": [{"type": "function", "function": func_call, "id": "123"}]}
+            else:
+                full_reply_content = {"type": "function_call", "function_call": func_call}
             # if chunk.system_fingerprint:
             #     full_reply_content['system_fingerprint'] = chunk.system_fingerprint
             # usage = self._calc_usage(messages, f"{func_call['name']}({func_call['arguments']})", functions=functions)
@@ -268,7 +338,11 @@ class GeminiAPI(BaseGPTAPI, RateLimiter):
         #     messages = self.messages_to_dict(messages)
         rsp = await self._achat_completion_stream(messages, functions=functions, function_call=function_call, event_bus=event_bus)
         return rsp
-
+    
+    async def acompletion_tool(self, messages: list[dict], tools: List[Dict[str, Any]]=None, tool_choice: Union[str, Dict[str, str]]=None, event_bus: EventBus=None, raise_for_string_output=False,**kwargs) -> dict:
+        rsp = await self._achat_completion_stream(messages, tools=tools, tool_choice=tool_choice, event_bus=event_bus, raise_for_string_output=raise_for_string_output, **kwargs)
+        return rsp
+    
     async def acompletion_text(self, messages: list[dict], stream=False, event_bus: EventBus=None) -> str:
         """when streaming, print each token in place."""
         if stream:
