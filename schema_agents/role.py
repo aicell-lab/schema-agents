@@ -642,12 +642,15 @@ class Role:
                 raise_for_string_output=False,
             )
             if isinstance(tool_calls, str):
-                messages.append(
-                    {
-                        "role": "assistant",
-                        "content": tool_calls if tool_calls.startswith("Internal Comment:") else f"[Internal Comment]: {tool_calls}",
-                    }
-                )
+                if len(tool_calls.strip()) > 0:
+                    messages.append(
+                        {
+                            "role": "assistant",
+                            "content": tool_calls if tool_calls.startswith("Internal Comment:") else f"[Internal Comment]: {tool_calls}",
+                        }
+                    )
+                else:
+                    logger.info("Empty response, skipping.")
                 continue
 
             tool_ids = metadata["tool_ids"]
