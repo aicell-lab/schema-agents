@@ -208,8 +208,23 @@ class GeminiAPI(BaseGPTAPI, RateLimiter):
                 role = msg.get("role")
                 if role == "system":
                     role = "user"
-                if role == "function":
+                if role == "function" and isinstance(msg.get("content"), str):
                     role = "user"
+                if role == "assistant":
+                    if 'tool_calls' in msg.keys():
+                        role = "function"
+                        content = {"function_call": {'name': msg['tool_calls'][0]['function']['name']}}
+                        msg = {"role": role, "parts": [content]}
+                    else:
+                        role = "model"
+                if role == "tool":
+                
+                    role = "function"
+                    fn = msg['name']
+                    val = msg['content']
+                    content=glm.Part(function_response=glm.FunctionResponse(name=fn, response={"result": val}))
+                    # content = {'function_response':{'name': msg['name'], 'response': {'content': msg['content']}}}
+                    msg = {"role": role, "parts": [content]}
                 if "parts" not in msg.keys():
                     content = msg.get("content")
                     msg = {"role": role, "parts": [content]}
@@ -224,7 +239,7 @@ class GeminiAPI(BaseGPTAPI, RateLimiter):
         # as {"role": "user", "parts": ["hello", "world"]}
         combined_messages = []
         for msg in processed_messages:
-            if combined_messages and combined_messages[-1]["role"] == msg["role"]:
+            if combined_messages and combined_messages[-1]["role"] == msg["role"] and msg["role"] != "function":
                 combined_messages[-1]["parts"].extend(msg["parts"])
             else:
                 combined_messages.append(msg)
@@ -255,6 +270,7 @@ class GeminiAPI(BaseGPTAPI, RateLimiter):
         func_call = {}
         function_call_detected = False
         tools=[]
+        acc_message = ""
         query_id = ''.join(random.choices(string.ascii_lowercase + string.digits, k=8))
         session = current_session.get() if current_session in copy_context() else None
         functions=kwargs.get("functions")
@@ -294,14 +310,23 @@ class GeminiAPI(BaseGPTAPI, RateLimiter):
                         if "arguments" not in func_call:
                             func_call["arguments"] = ""
                         func_call["arguments"] += json.dumps(fc_content['args'])
+                        if event_bus:
+                            event_bus.emit("stream", StreamEvent(type="function_call", query_id=query_id, session=session, name=func_call["name"], arguments=func_call["arguments"], status="start"))
                     content = json.dumps(type(fc).to_dict(fc), indent=4)
                 elif 'text' in chunk.candidates[0].content.parts[0]:
                     content = chunk.text
+                    if event_bus:
+                        acc_message += chunk.text
+                        if acc_message == chunk.text:
+                            event_bus.emit("stream", StreamEvent(type="text", query_id=query_id, session=session, content=chunk.text, status="start"))
+                        else:
+                            event_bus.emit("stream", StreamEvent(type="text", query_id=query_id, session=session, content=chunk.text, status="in_progress"))
+
             except Exception as e:
                 logger.warning(f"messages: {messages}\nerrors: {e}\n{BlockedPromptException(str(chunk))}")
                 raise BlockedPromptException(str(chunk))
             print(content)
-            collected_content.append(content)
+            collected_content.append({"content": content})
             print("\n")
 
         if function_call_detected:
