@@ -562,8 +562,8 @@ class Role:
             for fargs in tool_calls:
                 idx = tool_inputs_models.index(fargs.__class__)
                 args_ns, kwargs_ns = arg_names[idx]
-                args = [replace_internal_message(getattr(fargs, name)) for name in args_ns]
-                kwargs = {name: replace_internal_message(getattr(fargs, name)) for name in kwargs_ns}
+                args = [getattr(fargs, name) for name in args_ns]
+                kwargs = {name: getattr(fargs, name) for name in kwargs_ns}
                 func_info = {
                     "name": tools[idx].__name__,
                     "args": args,
@@ -627,18 +627,6 @@ class Role:
         loop_count = 0
         final_response = None
         current_out_schemas = all_out_schemas
-        internal_message_store = {}
-        def replace_internal_message(message):
-            if isinstance(message, str):
-                for message_id, content in internal_message_store.items():
-                    message = message.replace(f"$message-{message_id}$", content)
-                return message
-            elif isinstance(message, list):
-                return [replace_internal_message(item) for item in message]
-            elif isinstance(message, dict):
-                return {key: replace_internal_message(value) for key, value in message.items()}
-            else:
-                return message
 
         while True:
             loop_count += 1
@@ -655,12 +643,10 @@ class Role:
             )
             if isinstance(tool_calls, str):
                 if len(tool_calls.strip()) > 0:
-                    if tool_calls.startswith(f"[Internal Message] (id:"):
+                    if tool_calls.startswith(f"[Internal Message]:\n"):
                         content = tool_calls
                     else:
-                        message_id = str(uuid.uuid4())
-                        content = f"[Internal Message] (id={message_id}):\n\n```\n{tool_calls}\n```\n[Note: Use the $message-{message_id}$ to refer to this message in response.]"
-                        internal_message_store[message_id] = tool_calls
+                        content = f"[Internal Message]:\n{tool_calls}"
                     messages.append(
                         {
                             "role": "assistant",
@@ -680,8 +666,8 @@ class Role:
                 idx = tool_inputs_models.index(fargs.__class__)
                 if tools[idx] == CompleteUserQuery:
                     args_ns, kwargs_ns = arg_names[idx]
-                    args = [replace_internal_message(getattr(fargs, name)) for name in args_ns]
-                    kwargs = {name: replace_internal_message(getattr(fargs, name)) for name in kwargs_ns}
+                    args = [getattr(fargs, name) for name in args_ns]
+                    kwargs = {name: getattr(fargs, name) for name in kwargs_ns}
                     func_info = {
                         "name": tools[idx].__name__,
                         "args": args,
