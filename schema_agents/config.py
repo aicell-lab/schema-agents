@@ -64,7 +64,7 @@ class Config(metaclass=Singleton):
         self.openai_logprobs = self._get("OPENAI_LOGPROBS")
         self.openai_top_logprobs = self._get("OPENAI_TOP_LOGPROBS")
         self.openai_timeout = self._get("OPENAI_TIMEOUT", 15)
-        self.max_tokens_rsp = self._get("MAX_TOKENS", 2048)
+        self.max_tokens_rsp = int(self._get("MAX_TOKENS", 2048))
         self.deployment_name = self._get("DEPLOYMENT_NAME")
         self.deployment_id = self._get("DEPLOYMENT_ID")
 
