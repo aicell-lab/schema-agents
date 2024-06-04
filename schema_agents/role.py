@@ -617,7 +617,7 @@ class Role:
             f"{tool_usage_prompt}\n"
             "Directly use `CompleteUserQuery` for straightforward queries. For more complex inquiries, create a strategic plan with `StartNewPlan` and then execute the plan, adhering to this approach unless significant updates are necessary. Compile all insights into one final summary via `CompleteUserQuery`. Text responses generated during the process will serve as comments in the loop history and will not be shown to users. "
             "Ensure loops are concise and within limits, keeping each action relevant to the original query. If the query is unresolved, outline your approach for internal review and, if required, seek further clarification. "
-            "IMPORTANT: The only way to communicate a response to the user is by calling `CompleteUserQuery`. All text responses will be prefixed with `[Internal Message]:`, contributing to the loop history but not visible to users."
+            "IMPORTANT: The only way to communicate a response to the user is by calling `CompleteUserQuery`. Do not respond directly with text."
         )
 
         messages.append(
@@ -652,7 +652,6 @@ class Role:
                 use_tool_calls=True,
                 return_metadata=True,
                 prompt=loop_count_prompt,
-                raise_for_string_output=False,
             )
             if isinstance(tool_calls, str):
                 if len(tool_calls.strip()) > 0:
@@ -756,7 +755,6 @@ class Role:
         use_tool_calls=False,
         return_metadata=False,
         extra_schemas=None,
-        raise_for_string_output=None,
     ):
 
         assert extra_schemas is None or isinstance(extra_schemas, list)
@@ -843,6 +841,8 @@ class Role:
         functions = [schema_to_function(s) for s in set(output_types + input_schema)]
         if len(output_types) == 1 and not allow_str_output:
             function_call = {"name": output_types[0].__name__}
+        elif not allow_str_output:
+            function_call = "required"
         else:
             function_call = "auto"
         response = await self._llm.aask(
@@ -852,7 +852,6 @@ class Role:
             function_call=function_call,
             event_bus=self._event_bus,
             use_tool_calls=use_tool_calls,
-            raise_for_string_output=raise_for_string_output if raise_for_string_output is not None else (not allow_str_output),
         )
 
         try:

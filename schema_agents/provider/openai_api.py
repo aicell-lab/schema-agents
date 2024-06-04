@@ -170,7 +170,7 @@ class OpenAIGPTAPI(BaseGPTAPI, RateLimiter):
         )
         self.rpm = int(config.get("RPM", 10))
 
-    async def _achat_completion_stream(self, messages: list[dict], event_bus: EventBus=None, raise_for_string_output=False, **kwargs) -> str:
+    async def _achat_completion_stream(self, messages: list[dict], event_bus: EventBus=None, **kwargs) -> str:
         response = await self.aclient.chat.completions.create(
             **self._cons_kwargs(messages, functions=kwargs.get("functions")),
             stream=True,
@@ -231,8 +231,6 @@ class OpenAIGPTAPI(BaseGPTAPI, RateLimiter):
                             event_bus.emit("stream", StreamEvent(type="function_call", query_id=query_id, session=session, name=func_call["name"], arguments=chunk_message["function_call"]["arguments"], status="in_progress"))
                     function_call_detected = True
                 elif "content" in chunk_message and chunk_message["content"]:
-                    if raise_for_string_output:
-                        raise UnexpectedStringOutputError(f"Received a unexpected string output: {chunk_message['content']}")
                     if event_bus:
                         acc_message += chunk_message["content"]
                         if acc_message == chunk_message["content"]:
@@ -343,12 +341,12 @@ class OpenAIGPTAPI(BaseGPTAPI, RateLimiter):
         rsp = await self._achat_completion_stream(messages, event_bus=event_bus, **kwargs)
         return rsp
     
-    async def acompletion_function(self, messages: list[dict], functions: List[Dict[str, Any]]=None, function_call: Union[str, Dict[str, str]]=None, event_bus: EventBus=None, raise_for_string_output=False, **kwargs) -> dict:
-        rsp = await self._achat_completion_stream(messages, functions=functions, function_call=function_call, event_bus=event_bus, raise_for_string_output=raise_for_string_output, **kwargs)
+    async def acompletion_function(self, messages: list[dict], functions: List[Dict[str, Any]]=None, function_call: Union[str, Dict[str, str]]=None, event_bus: EventBus=None, **kwargs) -> dict:
+        rsp = await self._achat_completion_stream(messages, functions=functions, function_call=function_call, event_bus=event_bus, **kwargs)
         return rsp
 
-    async def acompletion_tool(self, messages: list[dict], tools: List[Dict[str, Any]]=None, tool_choice: Union[str, Dict[str, str]]=None, event_bus: EventBus=None, raise_for_string_output=False,**kwargs) -> dict:
-        rsp = await self._achat_completion_stream(messages, tools=tools, tool_choice=tool_choice, event_bus=event_bus, raise_for_string_output=raise_for_string_output, **kwargs)
+    async def acompletion_tool(self, messages: list[dict], tools: List[Dict[str, Any]]=None, tool_choice: Union[str, Dict[str, str]]=None, event_bus: EventBus=None, **kwargs) -> dict:
+        rsp = await self._achat_completion_stream(messages, tools=tools, tool_choice=tool_choice, event_bus=event_bus, **kwargs)
         return rsp
 
     async def acompletion_text(self, messages: list[dict], stream=False, event_bus: EventBus=None, **kwargs) -> str:
