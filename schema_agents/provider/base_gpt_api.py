@@ -38,14 +38,14 @@ class BaseGPTAPI(BaseChatbot):
     def ask(self, msg: Union[str, Dict[str, str]], functions: List[Dict[str, Any]]=None, function_call: Union[str, Dict[str, str]]=None, event_bus:EventBus=None) -> str:
         message = [self._default_system_msg(), self._user_msg(msg)]
         if function_call is not None:
-            assert isinstance(function_call, dict) or function_call in ['none', 'auto'], f"function_call must be dict or 'none', 'auto', but got {function_call}"
+            assert isinstance(function_call, dict) or function_call in ['none', 'auto', 'required'], f"function_call must be dict or 'none', 'auto', 'required', but got {function_call}"
         rsp = self.completion(message, functions=functions, function_call=function_call, event_bus=event_bus)
         fc = rsp.get("choices")[0]["message"].get("function_call")
         if fc is not None:
             return rsp.get("choices")[0]["message"].get("function_call")
         return self.get_choice_text(rsp)
 
-    async def aask(self, msg: Union[str, Dict[str, str], List[Dict[str, str]]], system_msgs: Optional[list[str]] = None, functions: List[Dict[str, Any]]=None, function_call: Union[str, Dict[str, str]]=None, event_bus: EventBus=None, use_tool_calls=True, raise_for_string_output=False) -> str:
+    async def aask(self, msg: Union[str, Dict[str, str], List[Dict[str, str]]], system_msgs: Optional[list[str]] = None, functions: List[Dict[str, Any]]=None, function_call: Union[str, Dict[str, str]]=None, event_bus: EventBus=None, use_tool_calls=True) -> str:
         if isinstance(msg, list):
             messages = []
             for m in msg:
@@ -62,7 +62,7 @@ class BaseGPTAPI(BaseChatbot):
             else:
                 messages = [self._default_system_msg(), user_msg]
         if function_call is not None:
-            assert isinstance(function_call, dict) or function_call in ['none', 'auto'], f"function_call must be dict or 'none', 'auto', but got {function_call}"
+            assert isinstance(function_call, dict) or function_call in ['none', 'auto', 'required'], f"function_call must be dict or 'none', 'auto', 'required', but got {function_call}"
         if functions:
             f_names = [f["name"] for f in functions]
             assert len(functions) == len(set(f_names)), f"functions must have unique names, but got {f_names}"
@@ -71,11 +71,11 @@ class BaseGPTAPI(BaseChatbot):
                     tool_choice = {"type": "function", "function": function_call}
                 else:
                     tool_choice = function_call
-                rsp = await self.acompletion_tool(messages, tools=[{"type": "function", "function": func} for func in functions], tool_choice=tool_choice, event_bus=event_bus, raise_for_string_output=raise_for_string_output)
+                rsp = await self.acompletion_tool(messages, tools=[{"type": "function", "function": func} for func in functions], tool_choice=tool_choice, event_bus=event_bus)
             else:
-                rsp = await self.acompletion_function(messages, functions=functions, function_call=function_call, event_bus=event_bus, raise_for_string_output=raise_for_string_output)
+                rsp = await self.acompletion_function(messages, functions=functions, function_call=function_call, event_bus=event_bus)
         else:
-            rsp = await self.acompletion_tool(messages, event_bus=event_bus, raise_for_string_output=raise_for_string_output)
+            rsp = await self.acompletion_tool(messages, event_bus=event_bus)
         # logger.debug(message)
         logger.debug(rsp)
         return rsp
