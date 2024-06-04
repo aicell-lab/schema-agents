@@ -562,8 +562,8 @@ class Role:
             for fargs in tool_calls:
                 idx = tool_inputs_models.index(fargs.__class__)
                 args_ns, kwargs_ns = arg_names[idx]
-                args = [getattr(fargs, name) for name in args_ns]
-                kwargs = {name: getattr(fargs, name) for name in kwargs_ns}
+                args = [replace_internal_message(getattr(fargs, name)) for name in args_ns]
+                kwargs = {name: replace_internal_message(getattr(fargs, name)) for name in kwargs_ns}
                 func_info = {
                     "name": tools[idx].__name__,
                     "args": args,
@@ -617,7 +617,7 @@ class Role:
             f"{tool_usage_prompt}\n"
             "Directly use `CompleteUserQuery` for straightforward queries. For more complex inquiries, create a strategic plan with `StartNewPlan` and then execute the plan, adhering to this approach unless significant updates are necessary. Compile all insights into one final summary via `CompleteUserQuery`. Text responses generated during the process will serve as comments in the loop history and will not be shown to users. "
             "Ensure loops are concise and within limits, keeping each action relevant to the original query. If the query is unresolved, outline your approach for internal review and, if required, seek further clarification. "
-            "IMPORTANT: The only way to communicate a response to the user is by calling `CompleteUserQuery`. All text responses will be prefixed with `[Internal Comment]:`, contributing to the loop history but not visible to users."
+            "IMPORTANT: The only way to communicate a response to the user is by calling `CompleteUserQuery`. All text responses will be prefixed with `[Internal Message]:`, contributing to the loop history but not visible to users."
         )
 
         messages.append(
@@ -627,6 +627,19 @@ class Role:
         loop_count = 0
         final_response = None
         current_out_schemas = all_out_schemas
+        internal_message_store = {}
+        def replace_internal_message(message):
+            if isinstance(message, str):
+                for message_id, content in internal_message_store.items():
+                    message = message.replace(f"$message-{message_id}$", content)
+                return message
+            elif isinstance(message, list):
+                return [replace_internal_message(item) for item in message]
+            elif isinstance(message, dict):
+                return {key: replace_internal_message(value) for key, value in message.items()}
+            else:
+                return message
+
         while True:
             loop_count += 1
             loop_count_prompt = (
@@ -643,10 +656,16 @@ class Role:
             )
             if isinstance(tool_calls, str):
                 if len(tool_calls.strip()) > 0:
+                    if tool_calls.startswith(f"[Internal Message] (id:"):
+                        content = tool_calls
+                    else:
+                        message_id = str(uuid.uuid4())
+                        content = f"[Internal Message] (id={message_id}):\n\n```\n{tool_calls}\n```\n[Note: Use the $message-{message_id}$ to refer to this message in response.]"
+                        internal_message_store[message_id] = tool_calls
                     messages.append(
                         {
                             "role": "assistant",
-                            "content": tool_calls if tool_calls.startswith("Internal Comment:") else f"[Internal Comment]: {tool_calls}",
+                            "content": content
                         }
                     )
                 else:
@@ -662,8 +681,8 @@ class Role:
                 idx = tool_inputs_models.index(fargs.__class__)
                 if tools[idx] == CompleteUserQuery:
                     args_ns, kwargs_ns = arg_names[idx]
-                    args = [getattr(fargs, name) for name in args_ns]
-                    kwargs = {name: getattr(fargs, name) for name in kwargs_ns}
+                    args = [replace_internal_message(getattr(fargs, name)) for name in args_ns]
+                    kwargs = {name: replace_internal_message(getattr(fargs, name)) for name in kwargs_ns}
                     func_info = {
                         "name": tools[idx].__name__,
                         "args": args,
