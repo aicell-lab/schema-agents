@@ -14,6 +14,7 @@ from inspect import signature
 from typing import Iterable, Optional, Union, Callable, List
 from pydantic import BaseModel, Field, ValidationError
 from pydantic.fields import FieldInfo
+from typing import get_origin
 
 from schema_agents.logs import logger
 from schema_agents.utils import parse_special_json, schema_to_function
@@ -433,7 +434,7 @@ class Role:
             type_hints = typing.get_type_hints(tool, localns=localns)
             types = [type_hints[name] for name in names]
             for t in types:
-                if inspect.isclass(t) and issubclass(t, BaseModel):
+                if inspect.isclass(t) and not get_origin(t) and issubclass(t, BaseModel):
                     t.__name__ = t.__name__ + "_IN"  # avoid name conflict
                     t.model_rebuild()
 
@@ -458,7 +459,7 @@ class Role:
                     Field(None, description="Thoughts for the tool call."),
                 )
             for t in types:
-                if inspect.isclass(t) and issubclass(t, BaseModel):
+                if inspect.isclass(t) and not get_origin(t) and issubclass(t, BaseModel):
                     assert (
                         tool.__name__ != t.__name__
                     ), f"Tool name cannot be the same as the input type name. {tool.__name__} == {t.__name__}"
