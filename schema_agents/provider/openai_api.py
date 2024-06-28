@@ -9,6 +9,7 @@ import asyncio
 import time
 import random
 import string
+import json
 from functools import wraps
 from typing import NamedTuple, Union, List, Dict, Any
 
@@ -133,6 +134,28 @@ class CostManager(metaclass=Singleton):
         """获得所有开销"""
         return Costs(self.total_prompt_tokens, self.total_completion_tokens, self.total_cost, self.total_budget)
 
+def replace_value_in_dict(item, original_schema):
+    if isinstance(item, list):
+        return [replace_value_in_dict(i, original_schema) for i in item]
+    elif isinstance(item, dict):
+        if "anyOf" in item:
+            if any(i.get("type") == "null" for i in item["anyOf"]):
+                other_type = [i for i in item["anyOf"] if i.get("type") != "null"][0]
+                other_type["description"] = f"Default to null. {other_type.get('description', '')}"
+                return replace_value_in_dict(other_type, original_schema)
+            else:
+                raise ValueError(f"anyOf must contain a type: null, but got {item}")
+                
+        if list(item.keys()) == ['$ref']:
+            definitions = item['$ref'][2:].split('/')
+            res = original_schema.copy()
+            for definition in definitions:
+                res = res[definition]
+            return replace_value_in_dict(res, original_schema)
+        else:
+            return { key: replace_value_in_dict(i, original_schema) for key, i in item.items()}
+    else:
+        return item
 
 class OpenAIGPTAPI(BaseGPTAPI, RateLimiter):
     """
@@ -171,8 +194,18 @@ class OpenAIGPTAPI(BaseGPTAPI, RateLimiter):
         self.rpm = int(config.get("RPM", 10))
 
     async def _achat_completion_stream(self, messages: list[dict], event_bus: EventBus=None, **kwargs) -> str:
+        if "tools" in kwargs:
+            functions = [tool["function"] for tool in kwargs["tools"] if tool["type"] == "function"]
+        else:
+            functions = kwargs.get("functions")
+
+        for func in functions:
+            func["parameters"] = replace_value_in_dict(func["parameters"].copy(), func["parameters"].copy())
+            if "$defs" in func["parameters"]:
+                del func["parameters"]["$defs"]
+            
         response = await self.aclient.chat.completions.create(
-            **self._cons_kwargs(messages, functions=kwargs.get("functions")),
+            **self._cons_kwargs(messages, functions=functions),
             stream=True,
             **kwargs
         )
@@ -223,6 +256,10 @@ class OpenAIGPTAPI(BaseGPTAPI, RateLimiter):
                         func_call["name"] = chunk_message["function_call"]["name"]
                         if event_bus:
                             event_bus.emit("stream", StreamEvent(type="function_call", query_id=query_id, session=session, name=func_call["name"], arguments=func_call.get("arguments", ""), status="start"))
+                    # Fix for gemni proxy: https://github.com/zuisong/gemini-openai-proxy/
+                    if "args" in chunk_message["function_call"]:
+                        chunk_message["function_call"]["arguments"] = json.dumps(chunk_message["function_call"]["args"])
+
                     if "arguments" in chunk_message["function_call"]:
                         if "arguments" not in func_call:
                             func_call["arguments"] = ""
@@ -260,6 +297,10 @@ class OpenAIGPTAPI(BaseGPTAPI, RateLimiter):
             if raw_chunk.system_fingerprint:
                 full_reply_content['system_fingerprint'] = raw_chunk.system_fingerprint
             usage = self._calc_usage(messages, f"{func_call['name']}({func_call['arguments']})", functions=kwargs.get("functions", None))
+            # convert to tool calls for gemni proxy
+            if "tools" in kwargs:
+                call_id = ''.join(random.choices(string.ascii_lowercase + string.digits, k=8))
+                full_reply_content = {"type": "tool_calls", "tool_calls": [{"id": call_id, "type": "function", "function": func_call}]}
         elif tool_call_detected:
             full_reply_content = {"type": "tool_calls", "tool_calls": [tool_calls[k] for k in sorted(list(tool_calls.keys()))]}
             if raw_chunk.system_fingerprint:
@@ -319,7 +360,15 @@ class OpenAIGPTAPI(BaseGPTAPI, RateLimiter):
         return kwargs
 
     async def _achat_completion(self, messages: list[dict], event_bus: EventBus=None, **kwargs) -> dict:
-        kwargs.update(self._cons_kwargs(messages, functions=kwargs.get("functions")))
+        if "tools" in kwargs:
+            functions = [tool["function"] for tool in kwargs["tools"] if tool["type"] == "function"]
+        else:
+            functions = kwargs.get("functions")
+        for func in functions:
+            func["parameters"] = replace_value_in_dict(func["parameters"].copy(), func["parameters"].copy())
+            if "$defs" in func["parameters"]:
+                del func["parameters"]["$defs"]
+        kwargs.update(self._cons_kwargs(messages, functions=functions))
         rsp = await self.aclient.chat.completions.create(**kwargs)
         self._update_costs(rsp.usage.dict())
         if event_bus:
