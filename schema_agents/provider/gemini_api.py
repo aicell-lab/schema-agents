@@ -15,10 +15,6 @@ from functools import wraps
 import textwrap
 from typing import NamedTuple, Union, List, Dict, Any
 
-import httpx
-import openai
-from openai import AsyncOpenAI, OpenAI
-
 from schema_agents.config import CONFIG
 from schema_agents.logs import logger
 from schema_agents.provider.base_gpt_api import BaseGPTAPI
@@ -321,7 +317,12 @@ class GeminiAPI(BaseGPTAPI, RateLimiter):
                             event_bus.emit("stream", StreamEvent(type="text", query_id=query_id, session=session, content=chunk.text, status="start"))
                         else:
                             event_bus.emit("stream", StreamEvent(type="text", query_id=query_id, session=session, content=chunk.text, status="in_progress"))
-
+                # if event_bus:
+                #     if function_call_detected:
+                #         if choice0.finish_reason in ["function_call", "stop"]:
+                #             event_bus.emit("function_call", func_call)
+                #             event_bus.emit("stream", StreamEvent(type="function_call", query_id=query_id, session=session, name=func_call["name"], arguments=func_call["arguments"], status="finished"))
+                    
             except Exception as e:
                 logger.warning(f"messages: {messages}\nerrors: {e}\n{BlockedPromptException(str(chunk))}")
                 raise BlockedPromptException(str(chunk))
@@ -357,6 +358,8 @@ class GeminiAPI(BaseGPTAPI, RateLimiter):
         # full_content = "".join(collected_content)
         # usage = await self.aget_usage(messages, full_reply_content)
         # self._update_costs(usage)
+        if event_bus:
+            event_bus.emit("completion", full_reply_content)
         return full_reply_content
 
     def completion(self, messages: list[dict], event_bus: EventBus=None) -> dict:
