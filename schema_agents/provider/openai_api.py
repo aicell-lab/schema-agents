@@ -138,10 +138,17 @@ def replace_value_in_dict(item, original_schema):
     if isinstance(item, list):
         return [replace_value_in_dict(i, original_schema) for i in item]
     elif isinstance(item, dict):
+        if "default" in item:
+            del item["default"]
+        if "exclusiveMinimum" in item:
+            del item["exclusiveMinimum"]
+            
         if "anyOf" in item:
             if any(i.get("type") == "null" for i in item["anyOf"]):
                 other_type = [i for i in item["anyOf"] if i.get("type") != "null"][0]
-                other_type["description"] = f"Default to null. {other_type.get('description', '')}"
+                if "$ref" not in other_type:
+                    other_type["description"] = f"Default to null. {item.get('description', '')}"
+                    
                 return replace_value_in_dict(other_type, original_schema)
             else:
                 raise ValueError(f"anyOf must contain a type: null, but got {item}")
