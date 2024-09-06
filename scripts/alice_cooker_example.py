@@ -26,6 +26,7 @@ async def main():
         goal="Your goal is to listen to user's request and propose recipes for making the most delicious meal for thanksgiving.",
         constraints=None,
         register_default_events=True,
+        model="gpt-4o-mini",
     )
     
     # Let's define a recipe book for Alice to use
