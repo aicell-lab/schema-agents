@@ -115,6 +115,34 @@ def num_tokens_from_functions(functions, encoding):
                             for o in v['enum']:
                                 function_tokens += 3
                                 function_tokens += len(encoding.encode(o))
+                        elif field == 'properties':
+                            function_tokens += 2
+                            for sub_key in v['properties']:
+                                function_tokens += len(encoding.encode(sub_key))
+                                sub_v = v['properties'][sub_key]
+                                for sub_field in sub_v:
+                                    function_tokens += len(encoding.encode(sub_field))
+                                    function_tokens += len(encoding.encode(sub_v[sub_field]))
+                        elif field == 'required':
+                            function_tokens += 2
+                            for req in v['required']:
+                                function_tokens += len(encoding.encode(req))
+                        elif field == 'additionalProperties':
+                            function_tokens += 2
+                            function_tokens += len(encoding.encode(str(v['additionalProperties'])))
+                        elif field == 'items':
+                            function_tokens += 2
+                            function_tokens += len(encoding.encode(str(v['items'])))
+                        elif field == 'anyOf':
+                            function_tokens += 2
+                            for any_of in v['anyOf']:
+                                function_tokens += len(encoding.encode(str(any_of)))
+                        elif field == 'default':
+                            function_tokens += 2
+                            function_tokens += len(encoding.encode(str(v['default'])))
+                        elif field == '$ref':
+                            function_tokens += 2
+                            function_tokens += len(encoding.encode(v['$ref']))
                         else:
                             print(f"Warning (token count): not supported field {field}")
                 function_tokens += 11
