@@ -137,6 +137,10 @@ def num_tokens_from_functions(functions, encoding):
                             function_tokens += 2
                             for any_of in v['anyOf']:
                                 function_tokens += len(encoding.encode(str(any_of)))
+                        elif field == 'allOf':
+                            function_tokens += 2
+                            for all_of in v['allOf']:
+                                function_tokens += len(encoding.encode(str(all_of)))
                         elif field == 'default':
                             function_tokens += 2
                             function_tokens += len(encoding.encode(str(v['default'])))
