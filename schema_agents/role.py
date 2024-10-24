@@ -145,6 +145,11 @@ class Role:
         """Get profile."""
         return self._setting.profile
 
+    @property
+    def role_setting(self):
+        """Get role setting"""
+        return self._setting
+
     def _get_prefix(self):
         """Get prefix."""
         if self._setting.instructions:
