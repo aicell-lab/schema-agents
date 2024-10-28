@@ -8,7 +8,6 @@
 from abc import abstractmethod
 from typing import Optional, Union, Dict, List, Any
 
-from schema_agents.logs import logger
 from schema_agents.provider.base_chatbot import BaseChatbot
 from schema_agents.utils.common import EventBus
 
@@ -45,40 +44,10 @@ class BaseGPTAPI(BaseChatbot):
             return rsp.get("choices")[0]["message"].get("function_call")
         return self.get_choice_text(rsp)
 
+    @abstractmethod
     async def aask(self, msg: Union[str, Dict[str, str], List[Dict[str, str]]], system_msgs: Optional[list[str]] = None, functions: List[Dict[str, Any]]=None, function_call: Union[str, Dict[str, str]]=None, event_bus: EventBus=None, use_tool_calls=True) -> str:
-        if isinstance(msg, list):
-            messages = []
-            for m in msg:
-                if isinstance(m, str):
-                    messages.append(self._user_msg(m))
-                else:
-                    messages.append(m)
-            if system_msgs:
-                messages = self._system_msgs(system_msgs) + messages
-        else:
-            user_msg = self._user_msg(msg) if isinstance(msg, str) else msg
-            if system_msgs:
-                messages = self._system_msgs(system_msgs) + [user_msg]
-            else:
-                messages = [self._default_system_msg(), user_msg]
-        if function_call is not None:
-            assert isinstance(function_call, dict) or function_call in ['none', 'auto', 'required'], f"function_call must be dict or 'none', 'auto', 'required', but got {function_call}"
-        if functions:
-            f_names = [f["name"] for f in functions]
-            assert len(functions) == len(set(f_names)), f"functions must have unique names, but got {f_names}"
-            if use_tool_calls:
-                if isinstance(function_call, dict):
-                    tool_choice = {"type": "function", "function": function_call}
-                else:
-                    tool_choice = function_call
-                rsp = await self.acompletion_tool(messages, tools=[{"type": "function", "function": func} for func in functions], tool_choice=tool_choice, event_bus=event_bus)
-            else:
-                rsp = await self.acompletion_function(messages, functions=functions, function_call=function_call, event_bus=event_bus)
-        else:
-            rsp = await self.acompletion_tool(messages, event_bus=event_bus)
-        # logger.debug(message)
-        logger.debug(rsp)
-        return rsp
+        """Asynchronous ask function with optional tools. Returns tool call
+        schemas and prompt completion from LLM"""
 
     def _extract_assistant_rsp(self, context):
         return "\n".join([i["content"] for i in context if i["role"] == "assistant"])
@@ -91,7 +60,7 @@ class BaseGPTAPI(BaseChatbot):
             rsp = self.completion(context)
             rsp_text = self.get_choice_text(rsp)
             context.append(self._assistant_msg(rsp_text))
-        return self._extract_assistant_rsp(context, event_bus=event_bus)
+        return self._extract_assistant_rsp(context)
 
     async def aask_batch(self, msgs: list, event_bus:EventBus=None) -> str:
         """Sequential questioning"""
@@ -114,7 +83,8 @@ class BaseGPTAPI(BaseChatbot):
         return rsp_text
 
     @abstractmethod
-    def completion(self, messages: list[dict], event_bus:EventBus=None):
+    def completion(self, messages: list[dict], event_bus:EventBus=None,
+                   functions=None, function_call=None):
         """All GPTAPIs are required to provide the standard OpenAI completion interface
         [
             {"role": "system", "content": "You are a helpful assistant."},

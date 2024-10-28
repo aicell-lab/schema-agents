@@ -10,7 +10,7 @@ import time
 import random
 import string
 from functools import wraps
-from typing import NamedTuple, Union, List, Dict, Any
+from typing import NamedTuple, Union, List, Dict, Any, Optional
 
 import httpx
 import openai
@@ -171,9 +171,12 @@ class OpenAIGPTAPI(BaseGPTAPI, RateLimiter):
         self.rpm = int(config.get("RPM", 10))
 
     async def _achat_completion_stream(self, messages: list[dict], event_bus: EventBus=None, **kwargs) -> str:
+        model = kwargs.pop("model", None)
+        
         response = await self.aclient.chat.completions.create(
             **self._cons_kwargs(messages, functions=kwargs.get("functions")),
             stream=True,
+            model=model,
             **kwargs
         )
 
@@ -317,17 +320,56 @@ class OpenAIGPTAPI(BaseGPTAPI, RateLimiter):
             kwargs_mode = {"model": self.model}
         kwargs.update(kwargs_mode)
         return kwargs
+    
+    async def aask(self, msg: Union[str, Dict[str, str], List[Dict[str, str]]], system_msgs: Optional[list[str]] = None, functions: List[Dict[str, Any]]=None, function_call: Union[str, Dict[str, str]]=None, event_bus: EventBus=None, use_tool_calls=True) -> str:
+        if isinstance(msg, list):
+            messages = []
+            for m in msg:
+                if isinstance(m, str):
+                    messages.append(self._user_msg(m))
+                else:
+                    messages.append(m)
+            if system_msgs:
+                messages = self._system_msgs(system_msgs) + messages
+        else:
+            user_msg = self._user_msg(msg) if isinstance(msg, str) else msg
+            if system_msgs:
+                messages = self._system_msgs(system_msgs) + [user_msg]
+            else:
+                messages = [self._default_system_msg(), user_msg]
+        if function_call is not None:
+            assert isinstance(function_call, dict) or function_call in ['none', 'auto', 'required'], f"function_call must be dict or 'none', 'auto', 'required', but got {function_call}"
+        if functions:
+            f_names = [f["name"] for f in functions]
+            assert len(functions) == len(set(f_names)), f"functions must have unique names, but got {f_names}"
+            if use_tool_calls:
+                if isinstance(function_call, dict):
+                    tool_choice = {"type": "function", "function": function_call}
+                else:
+                    tool_choice = function_call
+                rsp = await self.acompletion_tool(messages, tools=[{"type": "function", "function": func} for func in functions], tool_choice=tool_choice, event_bus=event_bus)
+            else:
+                rsp = await self.acompletion_function(messages, functions=functions, function_call=function_call, event_bus=event_bus)
+        else:
+            rsp = await self.acompletion_tool(messages, event_bus=event_bus)
+        # logger.debug(message)
+        logger.debug(rsp)
+        return rsp
 
     async def _achat_completion(self, messages: list[dict], event_bus: EventBus=None, **kwargs) -> dict:
         kwargs.update(self._cons_kwargs(messages, functions=kwargs.get("functions")))
-        rsp = await self.aclient.chat.completions.create(**kwargs)
+        messages = kwargs.pop("messages")
+        model = kwargs.pop("model")
+        rsp = await self.aclient.chat.completions.create(messages=messages, model=model, **kwargs)
         self._update_costs(rsp.usage.dict())
         if event_bus:
             event_bus.emit("completion", rsp)
         return rsp
 
     def _chat_completion(self, messages: list[dict], event_bus: EventBus=None) -> dict:
-        rsp = self.client.chat.completions.create(**self._cons_kwargs(messages))
+        kwargs = self._cons_kwargs(messages)
+        model = kwargs.pop("model")
+        rsp = self.client.chat.completions.create(model=model, **kwargs)
         self._update_costs(rsp)
         if event_bus:
             event_bus.emit("completion", rsp)
@@ -415,7 +457,7 @@ class OpenAIGPTAPI(BaseGPTAPI, RateLimiter):
             logger.error(f"moderating failed:{e}")
 
     def _moderation(self, content: Union[str, list[str]]):
-        rsp = self.client.chat.moderations.create(input=content)
+        rsp = self.client.moderations.create(input=content)
         return rsp
 
     async def amoderation(self, content: Union[str, list[str]]):
@@ -429,5 +471,5 @@ class OpenAIGPTAPI(BaseGPTAPI, RateLimiter):
             logger.error(f"moderating failed:{e}")
 
     async def _amoderation(self, content: Union[str, list[str]]):
-        rsp = await self.aclient.chat.moderations.create(input=content)
+        rsp = await self.aclient.moderations.create(input=content)
         return rsp
