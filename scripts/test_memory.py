@@ -12,9 +12,6 @@ from langchain.text_splitter import CharacterTextSplitter
 from langchain.vectorstores import FAISS
 from langchain.document_loaders import TextLoader
 
-from metagpt.document_store.faiss_store import FaissStore
-from metagpt.logs import logger
-
 class FunctionMemory(BaseModel):
     """Message of functions to be saved in faiss store."""
     function_name: str = Field(default="", description="Function name")
