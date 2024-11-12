@@ -194,6 +194,8 @@ class OpenAIGPTAPI(BaseGPTAPI, RateLimiter):
         try:
             # iterate through the stream of events
             async for raw_chunk in response:
+                if session.stop:
+                    raise RuntimeError("Session stopped")
                 collected_chunks.append(raw_chunk)  # save the event response
                 choice0 = raw_chunk.choices[0]
                 chunk_message = choice0.delta.dict()  # extract the message
