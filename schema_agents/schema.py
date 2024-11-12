@@ -102,6 +102,7 @@ class RoleSetting(BaseModel):
 class Session(BaseModel):
     id: Optional[str] = None
     role_setting: Optional[RoleSetting] = None
+    stop: bool = False
 
 
 class StreamEvent(BaseModel):
