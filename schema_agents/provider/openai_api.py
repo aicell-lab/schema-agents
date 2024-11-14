@@ -171,13 +171,11 @@ class OpenAIGPTAPI(BaseGPTAPI, RateLimiter):
         self.rpm = int(config.get("RPM", 10))
 
     async def _achat_completion_stream(self, messages: list[dict], event_bus: EventBus=None, **kwargs) -> str:
-        model = kwargs.pop("model", None)
-        
+        cons_kwargs = self._cons_kwargs(messages, functions=kwargs.get("functions"))
+        cons_kwargs.update(kwargs)
         response = await self.aclient.chat.completions.create(
-            **self._cons_kwargs(messages, functions=kwargs.get("functions")),
             stream=True,
-            model=model,
-            **kwargs
+            **cons_kwargs
         )
 
         # create variables to collect the stream of chunks
