@@ -26,6 +26,7 @@ from schema_agents.utils.common import EventBus
 from schema_agents.utils.common import current_session
 from contextlib import asynccontextmanager
 from contextvars import copy_context
+from schema_agents.config import CONFIG
 
 
 @asynccontextmanager
@@ -520,9 +521,7 @@ class Role:
                 description="An optional field for providing a rationale or explanation for the plan.",
             ),
         ):
-            """
-            This tool the agent to sketch a structured plan with ordered steps, each with actions and optional condition for execution.
-            """
+            """Use this tool to sketch a structured plan with ordered steps, each with actions and optional conditions for execution."""
             nonlocal _max_loop, current_out_schemas
             for step in steps:
                 step.max_loops = step.max_loops or 1
@@ -609,7 +608,7 @@ class Role:
         # fix_doc = lambda doc: doc.replace("\n", ";")[:100]
         # tool_entry = lambda s: f" - {s.__name__}: {fix_doc(s.__doc__)}"
         internal_tool_names = [s.__name__ for s in internal_tools]
-        get_doc = lambda s: s.__doc__.replace('\n', ';')[:100]
+        get_doc = lambda s: s.__doc__.replace('\n', ';')[:CONFIG.max_doc_length]
         tool_schema_names = "\n".join(
             [
                 f" - {s.__name__}: {get_doc(s)}"
