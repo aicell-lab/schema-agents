@@ -4,7 +4,8 @@ import traceback
 from typing import List, Union
 
 from schema_agents.role import Role
-from schema_agents.schema import Message
+from schema_agents.schema import Message, MemoryChunk
+from schema_agents.memory.long_term_memory import LongTermMemory
 from schema_agents.tools.code_interpreter import create_mock_client
 
 from schema_agents.teams.image_analysis_hub.schemas import (PythonFunctionScript, PythonFunctionScriptChanges, Change,
@@ -83,7 +84,8 @@ async def fix_code(
     )
     response = await role.aask(
         python_function_with_line_number,
-        Union[PythonFunctionScriptChanges, PythonFunctionScript],
+        # Union[PythonFunctionScriptChanges, PythonFunctionScript],
+        PythonFunctionScriptChanges,
         prompt=prompt,
     )
     if isinstance(response, PythonFunctionScript):
@@ -117,6 +119,12 @@ async def fix_code(
         )
         return await fix_code(role, client, python_function, output_summary)
 
+    # add the memory of experience
+    experience = response.experience
+    if experience:
+        error_memo = MemoryChunk(index=experience.summary, content=experience, category='error')
+        role.long_term_memory.add(error_memo)
+
     return PythonFunctionScript(
         function_names=python_function.function_names,
         docstring=python_function.docstring,
@@ -129,6 +137,13 @@ async def fix_code(
 async def generate_code(
     req: SoftwareRequirement, role: Role
 ) -> PythonFunctionScript:
+    # retrieve req-related memories from long term memory
+    memories = role.long_term_memory.retrieve(req.original_requirements, filter={"category": "error"})
+    if memories:
+        # concatenate the error experiences
+        error = "\n".join([m.content.error for m in memories])
+        req.additional_notes += f"\nPlease avoid the following error: {error}" # TODO, what to retreive from the error memory?
+
     return await role.aask(req, PythonFunctionScript)
 
 INSTALL_SCRIPT = """
@@ -175,11 +190,20 @@ async def test_run_python_function(
         )
     return python_function
 
+def create_long_term_memory():
+    memory = LongTermMemory()
+    role_id = 'data_engineer'
+    memory.recover_memory(role_id)
+    memory.clean() # this is for test purpose, to avoid the memory to be accumulated
+
+    return memory
+
 def create_data_engineer(client=None):
     async def develop_python_functions(
         req: SoftwareRequirement, role: Role
     ) -> PythonFunctionScript:
         """Develop python functions based on software requirements."""
+        
         # if isinstance(req, SoftwareRequirement):
         func = await generate_code(req, role)
         try:
@@ -188,6 +212,7 @@ def create_data_engineer(client=None):
             req.additional_notes += f"\nPlease avoid the following error: {exp}"
             func = await generate_code(req, role)
             func = await test_run_python_function(role, client, req.id, func)
+
         return func
         # else:
         #     if client:
@@ -205,6 +230,7 @@ def create_data_engineer(client=None):
         goal="Develop the python function script according to the software requirement, ensuring that it fulfills the desired functionality. Implement necessary algorithms, handle data processing, and write tests to validate the correctness of the function.",
         constraints=None,
         actions=[develop_python_functions],
+        long_term_memory=create_long_term_memory(),
     )
     return data_engineer
 
