@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Study Summaries</title>
+<style>
+body { font-family: Arial, sans-serif; margin: 0; padding: 0; background: #f4f4f4; }
+.container { max-width: 1200px; margin: auto; padding: 20px; }
+h1 { color: #333; }
+.experiment { background: #fff; margin-bottom: 20px; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+.experiment-header { margin-bottom: 20px; }
+.experiment-materials, .experiment-protocol { margin-bottom: 10px; }
+.materials-list, .protocol-steps { margin-top: 10px; }
+.materials-list li, .protocol-steps li { margin-bottom: 5px; }
+.diagram { margin-top: 20px; }
+</style>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10.0.0/dist/mermaid.min.js"></script>
+<script>mermaid.initialize({ startOnLoad: true });</script>
+</head>
+<body>
+<div class="container">
+<h1>Suggested Study Summaries</h1>
+
+<div class="experiment">
+<h2 class="experiment-header">Investigating the Role of mmu_circ_26984 in Aniline-Induced Hepatotoxicity</h2>
+<div class="experiment-materials">
+<strong>Materials:</strong>
+<ul class="materials-list">
+<li>Aniline</li>
+<li>N-acetylcysteine (NAC)</li>
+<li>AML12 cells</li>
+<li>C57BL/6 mice</li>
+<li>RNA extraction kits</li>
+<li>RT-qPCR reagents</li>
+<li>Western blot materials</li>
+<li>Immunohistochemistry kits</li>
+<li>Fluorescence in situ hybridization (FISH) probes</li>
+<li>CircRNA microarray kits</li>
+</ul>
+</div>
+<div class="experiment-protocol">
+<strong>Protocol:</strong>
+<ul class="protocol-steps">
+<li>Treat AML12 cells and C57BL/6 mice with aniline to induce hepatotoxicity.</li>
+<li>Administer NAC to a subset of aniline-treated cells and mice to assess its protective effect.</li>
+<li>Perform circRNA microarray analysis to identify differentially expressed circRNAs.</li>
+<li>Use RNA pulldown, LC-MS, and RNA immunoprecipitation to study the interaction between mmu_circ_26984 and Myh9.</li>
+<li>Conduct RT-qPCR, Western blot, and immunohistochemistry to analyze gene and protein expression.</li>
+<li>Apply FISH to visualize the localization of mmu_circ_26984 in liver tissues.</li>
+</ul>
+</div>
+<div class="diagram">
+<div class="mermaid">
+graph TD
+A[Aniline Exposure] -->|With NAC| B[Reduced Hepatotoxicity]
+A -->|Without NAC| C[Increased Hepatotoxicity]
+B --> D[Normal mmu_circ_26984 Levels]
+C --> E[Elevated mmu_circ_26984 Levels]
+style D fill:#4CAF50
+style E fill:#f44336
+</div>
+</div>
+</div>
+
+<div class="experiment">
+<h2 class="experiment-header">Assessment of Hematological Biomarkers for Lead Poisoning Prediction</h2>
+<div class="experiment-materials">
+<strong>Materials:</strong>
+<ul class="materials-list">
+<li>Human blood samples</li>
+<li>Lead standards</li>
+<li>Hematological analyzer</li>
+<li>Logistic regression software</li>
+<li>ROC curve analysis software</li>
+</ul>
+</div>
+<div class="experiment-protocol">
+<strong>Protocol:</strong>
+<ul class="protocol-steps">
+<li>Collect blood samples from individuals with occupational lead poisoning and healthy controls.</li>
+<li>Analyze hematological parameters using a hematological analyzer.</li>
+<li>Develop a logistic regression model incorporating RDW-CV, NLR, and Micro% to predict lead poisoning.</li>
+<li>Evaluate the diagnostic value of the model using ROC curve analysis.</li>
+<li>Compare the sensitivity and specificity of the model to existing diagnostic methods.</li>
+</ul>
+</div>
+<div class="diagram">
+<div class="mermaid">
+pie title Hematological Biomarkers for Lead Poisoning
+"RDW-CV" : 35
+"NLR" : 30
+"Micro%" : 25
+"Other Parameters" : 10
+</div>
+</div>
+</div>
+
+<div class="experiment">
+<h2 class="experiment-header">Elucidating the Impact of Pb and As on NRF2-Target Genes in Neural Progenitor Cells</h2>
+<div class="experiment-materials">
+<strong>Materials:</strong>
+<ul class="materials-list">
+<li>Human neural progenitor cells (NPCs)</li>
+<li>Lead (Pb) and arsenic (As) compounds</li>
+<li>ChIP-qPCR assay materials</li>
+<li>RNA extraction kits</li>
+<li>RT-qPCR reagents</li>
+<li>Western blot materials</li>
+<li>Transcriptomic analysis software</li>
+</ul>
+</div>
+<div class="experiment-protocol">
+<strong>Protocol:</strong>
+<ul class="protocol-steps">
+<li>Expose human NPCs to Pb and As to induce oxidative stress.</li>
+<li>Perform ChIP-qPCR assays to confirm NRF2 binding to the promoter regions of F2RL2, TRIM16L, and PANX2.</li>
+<li>Analyze gene expression changes using RT-qPCR.</li>
+<li>Assess protein levels with Western blot.</li>
+<li>Compare transcriptomic profiles of NPCs from ASD patients with those exposed to Pb and As.</li>
+</ul>
+</div>
+<div class="diagram">
+<div class="mermaid">
+graph TD
+A[Pb and As Exposure] --> B[Oxidative Stress in NPCs]
+B --> C[Increased NRF2 Activity]
+C --> D[Upregulated Target Genes]
+D --> E[Impaired Neuronal Functions]
+style E fill:#f44336
+</div>
+</div>
+</div>
+
+</div>
+</body>
+</html>
