@@ -82,7 +82,7 @@ class Config(metaclass=Singleton):
         if self.long_term_memory:
             logger.warning("LONG_TERM_MEMORY is True")
         self.max_budget = self._get("MAX_BUDGET", 10.0)
-        self.max_doc_length = self.get("MAX_DOC_LENGTH", 500)
+        self.max_doc_length = self.get("MAX_DOC_LENGTH", 2000)
         self.total_cost = 0.0
 
     def _init_with_config_files_and_env(self, configs: dict, yaml_file):
