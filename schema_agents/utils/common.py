@@ -1,62 +1,36 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-"""
-@Time    : 2023/4/29 16:07
-@Author  : alexanderwu
-@File    : common.py
-"""
-import ast
 import inspect
 import os
 import asyncio
+import uuid
 
 from contextvars import ContextVar
+from schema_agents.schema import Session
 
 current_session = ContextVar('current_session', default=None)
+
+
+from contextlib import asynccontextmanager
+from contextvars import copy_context
+
+@asynccontextmanager
+async def create_session_context(id=None, role_setting=None, event_bus=None):
+    id = id or str(uuid.uuid4())
+    pre_session = current_session.get()
+    if pre_session:
+        id = id or pre_session.id
+        role_setting = role_setting or pre_session.role_setting
+        event_bus = event_bus or pre_session.event_bus
+    current_session.set(Session(id=id, role_setting=role_setting, event_bus=event_bus))
+    yield copy_context()
+    current_session.set(pre_session)
 
 def check_cmd_exists(command) -> int:
     """Check if a command exists in the current system."""
     check_command = 'command -v ' + command + ' >/dev/null 2>&1 || { echo >&2 "no mermaid"; exit 1; }'
     result = os.system(check_command)
     return result
-
-
-class UnexpectedStringOutputError(Exception):
-    pass
-
-
-class NoMoneyException(Exception):
-    """Raised when the operation cannot be completed due to insufficient funds"""
-
-    def __init__(self, amount, message="Insufficient funds"):
-        self.amount = amount
-        self.message = message
-        super().__init__(self.message)
-
-    def __str__(self):
-        return f'{self.message} -> Amount required: {self.amount}'
-
-
-def print_members(module, indent=0):
-    """
-    https://stackoverflow.com/questions/1796180/how-can-i-get-a-list-of-all-classes-within-current-module-in-python
-    :param module:
-    :param indent:
-    :return:
-    """
-    prefix = ' ' * indent
-    for name, obj in inspect.getmembers(module):
-        print(name, obj)
-        if inspect.isclass(obj):
-            print(f'{prefix}Class: {name}')
-            # print the methods within the class
-            if name in ['__class__', '__base__']:
-                continue
-            print_members(obj, indent + 2)
-        elif inspect.isfunction(obj):
-            print(f'{prefix}Function: {name}')
-        elif inspect.ismethod(obj):
-            print(f'{prefix}Method: {name}')
 
 class EventBus:
     """An event bus class."""

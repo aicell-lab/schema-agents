@@ -1,13 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-"""
-@Time    : 2023/5/12 00:30
-@Author  : alexanderwu
-@File    : software_team.py
-"""
-from typing import Union, Optional
-from pydantic import BaseModel, Field 
-from schema_agents.config import CONFIG
+from typing import Union
 from schema_agents.logs import logger
 from schema_agents.role import Role
 from schema_agents.schema import Message
@@ -40,12 +33,12 @@ class Team(Role):
     def invest(self, investment: float):
         """Invest team. raise NoMoneyException when exceed max_budget."""
         self._investment += investment
-        CONFIG.max_budget = self._investment
+        self.max_budget = self._investment
         logger.info(f'Investment: ${self._investment}.')
 
     def _check_balance(self):
-        if CONFIG.total_cost > CONFIG.max_budget:
-            raise NoMoneyException(CONFIG.total_cost, f'Insufficient funds: {CONFIG.max_budget}')
+        if self.total_cost > self.max_budget:
+            raise NoMoneyException(self.total_cost, f'Insufficient funds: {self.max_budget}')
 
     def _save(self):
         logger.info(self.json())
