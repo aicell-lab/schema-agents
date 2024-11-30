@@ -1,19 +1,17 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-"""
-@Time    : 2023/4/29 15:50
-@Author  : alexanderwu
-@File    : __init__.py
-"""
-
+from __future__ import annotations
 import os
 import subprocess
 import tempfile
 import re
 import json
+from typing import List, Dict, Any, Callable, Union
 
 from pydantic import BaseModel, create_model
-
+from collections import defaultdict
+import inspect
+import pydantic
 
 
 def convert_key_name(key_name):
@@ -139,3 +137,161 @@ def dict_to_pydantic_model(name: str, dict_def: dict, doc: str = None):
     model = create_model(name, **fields)
     model.__doc__ = doc
     return model
+
+
+
+def organize_messages(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Organizes and merges consecutive messages of the same type and ensures the system message is first.
+
+    Args:
+        messages (List[Dict[str, Any]]): A list of message dictionaries.
+
+    Returns:
+        List[Dict[str, Any]]: The organized and merged messages.
+    """
+    if not messages:
+        return []
+
+    # Separate the system message and others
+    system_message = None
+    non_system_messages = []
+
+    for message in messages:
+        if message["role"] == "system" and system_message is None:
+            system_message = message
+        else:
+            non_system_messages.append(message)
+
+    # Combine the system message with the rest
+    organized_messages = [system_message] if system_message else []
+    organized_messages += merge_consecutive_messages(non_system_messages)
+
+    return organized_messages
+
+
+def merge_consecutive_messages(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Merges consecutive messages of the same type.
+
+    Args:
+        messages (List[Dict[str, Any]]): A list of message dictionaries.
+
+    Returns:
+        List[Dict[str, Any]]: The merged messages.
+    """
+    if not messages:
+        return []
+
+    merged_messages = []
+    current_message = None
+
+    for message in messages:
+        if not current_message:
+            current_message = message
+            continue
+
+        # Merge consecutive messages based on role and content
+        if (
+            current_message["role"] == message["role"]
+            and current_message["role"] != "tool"  # Don't merge tool role
+            and ("tool_calls" in current_message) == ("tool_calls" in message)  # Match presence of tool_calls
+        ):
+            if "content" in current_message and "content" in message:
+                current_message["content"] += message["content"]
+
+            if "tool_calls" in current_message and "tool_calls" in message:
+                current_message["tool_calls"] += message["tool_calls"]
+        else:
+            merged_messages.append(current_message)
+            current_message = message
+
+    if current_message:
+        merged_messages.append(current_message)
+
+    return merged_messages
+
+
+def _parse_docstring(doc_string: Union[str, None]) -> dict[str, str]:
+  """
+  Parse the docstring of a function into a dictionary.
+  This function was taken from ollama made by @Ollama team released under the MIT license.
+  Source: https://github.com/ollama/ollama-python/blob/main/ollama/_utils.py
+  """
+  parsed_docstring = defaultdict(str)
+  if not doc_string:
+    return parsed_docstring
+
+  key = hash(doc_string)
+  for line in doc_string.splitlines():
+    lowered_line = line.lower().strip()
+    if lowered_line.startswith('args:'):
+      key = 'args'
+    elif lowered_line.startswith('returns:') or lowered_line.startswith('yields:') or lowered_line.startswith('raises:'):
+      key = '_'
+
+    else:
+      # maybe change to a list and join later
+      parsed_docstring[key] += f'{line.strip()}\n'
+
+  last_key = None
+  for line in parsed_docstring['args'].splitlines():
+    line = line.strip()
+    if ':' in line:
+      # Split the line on either:
+      # 1. A parenthetical expression like (integer) - captured in group 1
+      # 2. A colon :
+      # Followed by optional whitespace. Only split on first occurrence.
+      parts = re.split(r'(?:\(([^)]*)\)|:)\s*', line, maxsplit=1)
+
+      arg_name = parts[0].strip()
+      last_key = arg_name
+
+      # Get the description - will be in parts[1] if parenthetical or parts[-1] if after colon
+      arg_description = parts[-1].strip()
+      if len(parts) > 2 and parts[1]:  # Has parenthetical content
+        arg_description = parts[-1].split(':', 1)[-1].strip()
+
+      parsed_docstring[last_key] = arg_description
+
+    elif last_key and line:
+      parsed_docstring[last_key] += ' ' + line
+
+  return parsed_docstring
+
+
+def convert_function_to_tool(func: Callable) -> dict:
+  """
+  Convert a function to a tool schema.
+  This function was taken from ollama made by @Ollama team released under the MIT license.
+  Source: https://github.com/ollama/ollama-python/blob/main/ollama/_utils.py
+  """
+  doc_string_hash = hash(inspect.getdoc(func))
+  parsed_docstring = _parse_docstring(inspect.getdoc(func))
+  schema = type(
+    func.__name__,
+    (pydantic.BaseModel,),
+    {
+      '__annotations__': {k: v.annotation if v.annotation != inspect._empty else str for k, v in inspect.signature(func).parameters.items()},
+      '__signature__': inspect.signature(func),
+      '__doc__': parsed_docstring[doc_string_hash],
+    },
+  ).model_json_schema()
+
+  for k, v in schema.get('properties', {}).items():
+    # If type is missing, the default is string
+    types = {t.get('type', 'string') for t in v.get('anyOf')} if 'anyOf' in v else {v.get('type', 'string')}
+    if 'null' in types:
+      schema['required'].remove(k)
+      types.discard('null')
+
+    schema['properties'][k] = {
+      'description': parsed_docstring[k],
+      'type': ', '.join(types),
+    }
+
+  return {
+    "name": func.__name__,
+    "description": schema.get('description', ''),
+    "parameters": schema,
+  }
