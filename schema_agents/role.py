@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-import json
 import uuid
 import traceback
+import json
 import types
 import typing
 from functools import partial
@@ -14,30 +14,19 @@ from inspect import signature
 from typing import Iterable, Optional, Union, Callable, List
 from pydantic import BaseModel, Field, ValidationError
 from pydantic.fields import FieldInfo
+from openai.types.chat.chat_completion_message_tool_call import (
+    ChatCompletionMessageToolCall,
+)
 from typing import get_origin
 
 from schema_agents.logs import logger
 from schema_agents.utils import parse_special_json, schema_to_function
-from schema_agents.llm import LLM
-from schema_agents.schema import Message, RoleSetting, Session
-from schema_agents.memory.long_term_memory import LongTermMemory
-from schema_agents.utils import dict_to_pydantic_model
+
+from schema_agents.schema import Message, RoleSetting
+from schema_agents.utils import dict_to_pydantic_model, organize_messages
 from schema_agents.utils.common import EventBus
-from schema_agents.utils.common import current_session
-from contextlib import asynccontextmanager
-from contextvars import copy_context
-from schema_agents.config import CONFIG
-
-
-@asynccontextmanager
-async def create_session_context(id=None, role_setting=None):
-    pre_session = current_session.get()
-    if pre_session:
-        id = id or pre_session.id
-        role_setting = role_setting or pre_session.role_setting
-    current_session.set(Session(id=id, role_setting=role_setting))
-    yield copy_context()
-    current_session.set(pre_session)
+from schema_agents.utils.common import create_session_context
+from schema_agents.llm import acompletion
 
 
 class ToolExecutionError(BaseModel):
@@ -75,13 +64,11 @@ class Role:
         constraints=None,
         instructions="",
         icon="🤖",
-        long_term_memory: Optional[LongTermMemory] = None,
         event_bus: EventBus = None,
         actions: list[Callable] = None,
         register_default_events: bool = False,
-        **kwargs,
+        **model_kwargs,
     ):
-        self._llm = LLM(**kwargs)
         self._setting = RoleSetting(
             name=name,
             profile=profile,
@@ -98,7 +85,6 @@ class Role:
         self._action_index = {}
         self._user_support_actions = []
         self._watch_schemas = set()
-        self.long_term_memory = long_term_memory
         if event_bus:
             self.set_event_bus(event_bus)
         else:
@@ -109,10 +95,7 @@ class Role:
             event_bus = self.get_event_bus()
             event_bus.register_default_events()
         self._init_actions(self._actions)
-
-    @property
-    def llm(self):
-        return self._llm
+        self._model_kwargs = model_kwargs
 
     def _reset(self):
         self._states = []
@@ -294,7 +277,7 @@ class Role:
                 for action in actions:
                     responses.append(self._run_action(action, msg))
             async with create_session_context(
-                id=msg.session_id, role_setting=self._setting
+                id=msg.session_id, role_setting=self._setting, event_bus=self._event_bus
             ):
                 responses = await asyncio.gather(*responses)
 
@@ -369,34 +352,35 @@ class Role:
         return messages, input_schema
 
     def _parse_outputs(self, response, output_types=None, parallel_call=None):
-        if response["type"] == "text":
-            return response["content"], {
-                "system_fingerprint": response.get("system_fingerprint")
-            }
-        elif response["type"] == "function_call":
-            func_call = response["function_call"]
-            assert func_call["name"] in [
-                s.__name__ for s in output_types
-            ], f"Invalid function name: {func_call['name']}"
-            idx = [s.__name__ for s in output_types].index(func_call["name"])
-            arguments = parse_special_json(func_call["arguments"])
-            function_args = output_types[idx].parse_obj(arguments)
-            return function_args, {
-                "system_fingerprint": response.get("system_fingerprint"),
-                "function_call": func_call,
-            }
-        elif response["type"] == "tool_calls":
-            tool_calls = response["tool_calls"]
+        message = response.choices[0].message
+        if output_types and not message.tool_calls and message.content:
+            parsed_function_call = json.loads(message.content)
+            if isinstance(parsed_function_call, dict):
+                message.tool_calls = [
+                    ChatCompletionMessageToolCall.model_validate(parsed_function_call)
+                ]
+            elif isinstance(parsed_function_call, list):
+                message.tool_calls = [
+                    ChatCompletionMessageToolCall.model_validate(p)
+                    for p in parsed_function_call
+                ]
+                
+        if message.tool_calls:
             functions = []
             ids = []
-            for tool_call in tool_calls:
+            tool_calls = []
+            for tool_call in message.tool_calls:
+                tool_call = tool_call.model_dump()
                 assert tool_call["type"] == "function"
                 func_call = tool_call["function"]
                 assert func_call["name"] in [
                     s.__name__ for s in output_types
                 ], f"Invalid function name: {func_call['name']}"
                 idx = [s.__name__ for s in output_types].index(func_call["name"])
-                arguments = parse_special_json(func_call["arguments"])
+                if not func_call["arguments"]:
+                    arguments = {}
+                else:
+                    arguments = parse_special_json(func_call["arguments"])
                 if len(arguments.keys()) == 1 and "_" in arguments.keys():
                     arguments = arguments["_"]
                 model = output_types[idx]
@@ -412,12 +396,17 @@ class Role:
                         raise
                 functions.append(fargs)
                 ids.append(tool_call["id"])
+                tool_calls.append(tool_call)
             if not parallel_call:
                 functions = functions[0]
             return functions, {
                 "tool_ids": ids,
-                "system_fingerprint": response.get("system_fingerprint"),
+                "system_fingerprint": response.system_fingerprint,
                 "tool_calls": tool_calls,
+            }
+        else:
+            return message.content, {
+                "system_fingerprint": response.system_fingerprint
             }
 
     def _parse_tools(self, tools, internal_tools, thoughts_schema=None, localns=None):
@@ -608,7 +597,7 @@ class Role:
         # fix_doc = lambda doc: doc.replace("\n", ";")[:100]
         # tool_entry = lambda s: f" - {s.__name__}: {fix_doc(s.__doc__)}"
         internal_tool_names = [s.__name__ for s in internal_tools]
-        get_doc = lambda s: s.__doc__.replace('\n', ';')[:CONFIG.max_doc_length]
+        get_doc = lambda s: s.__doc__.replace('\n', ';')
         tool_schema_names = "\n".join(
             [
                 f" - {s.__name__}: {get_doc(s)}"
@@ -743,11 +732,11 @@ class Role:
         req,
         output_schema=None,
         prompt=None,
-        use_tool_calls=False,
+        use_tool_calls=True,
         return_metadata=False,
         extra_schemas=None,
     ):
-
+        assert use_tool_calls == True, "Please set `use_tool_calls` to True when calling `aask`."
         assert extra_schemas is None or isinstance(extra_schemas, list)
         output_schema = output_schema or str
         messages, input_schema = self._normalize_messages(req)
@@ -810,43 +799,37 @@ class Role:
         if prompt:
             system_prompt += f"\n{prompt}"
             # messages.append({"role": "user", "content": f"{prompt}"})
-        system_msgs = [system_prompt]
+        messages = [{"role": "system", "content": system_prompt}] + messages
 
         if output_schema is str:
-            function_call = "none"
-            response = await self._llm.aask(
-                messages,
-                system_msgs,
-                functions=[schema_to_function(s) for s in input_schema],
-                function_call=function_call,
-                event_bus=self._event_bus,
+            response = await acompletion(
+                organize_messages(messages),
+                **self._model_kwargs,
             )
             assert (
-                response["type"] == "text"
+                response.choices[0].message.content is not None
             ), f"Invalid response type, it must be a text"
             content, metadata = self._parse_outputs(response)
             if return_metadata:
                 return content, metadata
             return content
 
-        functions = [schema_to_function(s) for s in set(output_types + input_schema)]
+        tools = [{"type": "function", "function": schema_to_function(s)} for s in set(output_types + input_schema)]
         if len(output_types) == 1 and not allow_str_output:
-            function_call = {"name": output_types[0].__name__}
+            tool_choice = {"type": "function", "function": {"name": output_types[0].__name__}}
         elif not allow_str_output:
-            function_call = "required"
+            tool_choice = "required"
         else:
-            function_call = "auto"
-        response = await self._llm.aask(
-            messages,
-            system_msgs,
-            functions=functions,
-            function_call=function_call,
-            event_bus=self._event_bus,
-            use_tool_calls=use_tool_calls,
-        )
+            tool_choice = "auto"
 
+        response = await acompletion(
+            organize_messages(messages),
+            tools=tools,
+            tool_choice=tool_choice,
+            **self._model_kwargs,
+        )
+        
         try:
-            assert not isinstance(response, str), f"Invalid response. {prompt}"
             function_args, metadata = self._parse_outputs(
                 response, output_types, parallel_call
             )
@@ -864,13 +847,11 @@ class Role:
                     "content": f"Failed to parse the response, error:\n{traceback.format_exc()}\nPlease regenerate to fix the error.",
                 }
             )
-            response = await self._llm.aask(
-                messages,
-                system_msgs,
-                functions=functions,
-                function_call=function_call,
-                event_bus=self._event_bus,
-                use_tool_calls=use_tool_calls,
+            response = await acompletion(
+                organize_messages(messages),
+                tools=tools,
+                tool_choice=tool_choice,
+                **self._model_kwargs,
             )
             function_args, metadata = self._parse_outputs(
                 response, output_types, parallel_call

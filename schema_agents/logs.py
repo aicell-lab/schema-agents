@@ -1,11 +1,5 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-"""
-@Time    : 2023/6/1 12:41
-@Author  : alexanderwu
-@File    : logs.py
-"""
-
 import sys
 
 from loguru import logger as _logger

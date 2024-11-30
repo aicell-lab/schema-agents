@@ -8,20 +8,20 @@ readme = "README.md"
 description = "A schema-based LLM framework for building multi-agent collaborative systems."
 dependencies = [
     "numpy>=1.21.2",
-    "jsonschema>=4.0.1",
-    "shortuuid>=1.0.1",
     "pydantic>=2.6.1",
-    "openai>=1.31.0",
+    "openai>=1.55.3",
     "loguru",
-    "jupyter-client",
-    "faiss-cpu",
-    "pyyaml",
-    "tiktoken>=0.7.0",
-    "tenacity",
     "openapi-pydantic",
     "makefun>=1.15.2",
-    "langchain>=0.1.10",
-    "langchain-community>=0.0.25"
+    "hypha>=0.20.41.post2",
+    # "jsonschema>=4.0.1",
+    # "shortuuid>=1.0.1",
+    # "jhub-client",
+    # "aiohttp-sse-client",
+    # "jupyter-client",
+    # "faiss-cpu",
+    # "tiktoken>=0.7.0",
+    # "tenacity",
 ]
 
 [tool.setuptools]
