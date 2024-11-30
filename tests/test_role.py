@@ -15,7 +15,7 @@ class SoftwareRequirementDocument(BaseModel):
     product_goals: List[str] = Field(description="Up to 3 clear, orthogonal product goals. If the requirement itself is simple, the goal should also be simple")
     user_stories: List[str] = Field(description="up to 5 scenario-based user stories, If the requirement itself is simple, the user stories should also be less")
     ui_design_draft: str = Field(description="Describe the elements and functions, also provide a simple style description and layout description.")
-    anything_unclear: str = Field(None, description="Make clear here.")
+    anything_unclear: Optional[str] = Field(None, description="Make clear here.")
 
 class UserClarification(BaseModel):
     """Provide more details for the use case."""
@@ -61,18 +61,40 @@ class FormDialogInfo(BaseModel):
 
 
 @pytest.mark.asyncio
+async def test_tool_call_ollama():
+    agent = Role(name="Alice",
+                profile="BioImage Analyst",
+                goal="A are a helpful agent",
+                constraints=None,
+                model="qwen2.5-coder",
+                client_config={
+                    "base_url": 'https://hypha-ollama.scilifelab-2-dev.sys.kth.se/v1',
+                    "api_key": 'ollama', # required, but unused
+                },
+            )
+
+    ret = await agent.aask("Hi, say hello to me! Then tell me an interesting story", str)
+    assert "hello" in ret.lower()
+    
+    ret = await agent.aask(f"Hi, create collection information from users. In the goal tell user a long story to motivate the user and keep the user happy", UserInput)
+    assert isinstance(ret, UserInput)
+    
+    
+
+@pytest.mark.asyncio
 async def test_tool_call_without_argument():
     agent = Role(name="Alice",
                 profile="BioImage Analyst",
                 goal="A are a helpful agent",
-                constraints=None)
+                constraints=None,
+                )
 
     @schema_tool
     async def say_hello(name: Optional[str]=Field("alice", description="Name")) -> str:
         """Say hello."""
         return f"Hello {name}"
     
-    ret = await agent.acall("Call say_hello without passing name into the argument, just call it", [say_hello], str)
+    ret = await agent.acall("Call say_hello without passing name into the argument, just call it, then show the result from the call", [say_hello], str)
     assert "alice" in ret 
 
 
