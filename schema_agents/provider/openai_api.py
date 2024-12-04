@@ -14,7 +14,7 @@ from typing import NamedTuple, Union, List, Dict, Any, Optional
 
 import httpx
 import openai
-from openai import AsyncOpenAI, OpenAI
+from openai import AsyncOpenAI, OpenAI, AsyncAzureOpenAI, AzureOpenAI
 
 from schema_agents.config import CONFIG
 from schema_agents.logs import logger
@@ -160,14 +160,26 @@ class OpenAIGPTAPI(BaseGPTAPI, RateLimiter):
         if config.openai_api_type:
             openai.api_type = config.openai_api_type
             openai.api_version = config.openai_api_version
-        self.aclient = AsyncOpenAI(
-            api_key=config.openai_api_key,
-            base_url=config.openai_api_base,
-        )
-        self.client = OpenAI(
-            api_key=config.openai_api_key,
-            base_url=config.openai_api_base,
-        )
+        if config.openai_api_type == "azure":
+            self.aclient = AsyncAzureOpenAI(
+                api_key=config.openai_api_key,
+                api_version=config.openai_api_version,
+                azure_endpoint=config.openai_api_base,
+            )
+            self.client = AzureOpenAI(
+                api_key=config.openai_api_key,
+                api_version=config.openai_api_version,
+                azure_endpoint=config.openai_api_base,
+            )
+        else:
+            self.aclient = AsyncOpenAI(
+                api_key=config.openai_api_key,
+                base_url=config.openai_api_base,
+            )
+            self.client = OpenAI(
+                api_key=config.openai_api_key,
+                base_url=config.openai_api_base,
+            )
         self.rpm = int(config.get("RPM", 10))
 
     async def _achat_completion_stream(self, messages: list[dict], event_bus: EventBus=None, **kwargs) -> str:
@@ -194,6 +206,8 @@ class OpenAIGPTAPI(BaseGPTAPI, RateLimiter):
             async for raw_chunk in response:
                 if session.stop:
                     raise RuntimeError("Session stopped")
+                if len(raw_chunk.choices) <= 0:
+                    continue
                 collected_chunks.append(raw_chunk)  # save the event response
                 choice0 = raw_chunk.choices[0]
                 chunk_message = choice0.delta.dict()  # extract the message
@@ -305,19 +319,7 @@ class OpenAIGPTAPI(BaseGPTAPI, RateLimiter):
             kwargs["logprobs"] = self.logprobs
         if self.top_logprobs:
             kwargs["top_logprobs"] = self.top_logprobs
-
-        if CONFIG.openai_api_type == "azure":
-            if CONFIG.deployment_name and CONFIG.deployment_id:
-                raise ValueError("You can only use one of the `deployment_id` or `deployment_name` model")
-            elif not CONFIG.deployment_name and not CONFIG.deployment_id:
-                raise ValueError("You must specify `DEPLOYMENT_NAME` or `DEPLOYMENT_ID` parameter")
-            kwargs_mode = (
-                {"engine": CONFIG.deployment_name}
-                if CONFIG.deployment_name
-                else {"deployment_id": CONFIG.deployment_id}
-            )
-        else:
-            kwargs_mode = {"model": self.model}
+        kwargs_mode = {"model": self.model}
         kwargs.update(kwargs_mode)
         return kwargs
     
