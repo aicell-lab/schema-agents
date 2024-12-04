@@ -319,19 +319,6 @@ class OpenAIGPTAPI(BaseGPTAPI, RateLimiter):
             kwargs["logprobs"] = self.logprobs
         if self.top_logprobs:
             kwargs["top_logprobs"] = self.top_logprobs
-
-        if CONFIG.openai_api_type == "azure":
-            # if CONFIG.deployment_name and CONFIG.deployment_id:
-            #     raise ValueError("You can only use one of the `deployment_id` or `deployment_name` model")
-            # elif not CONFIG.deployment_name and not CONFIG.deployment_id:
-            #     raise ValueError("You must specify `DEPLOYMENT_NAME` or `DEPLOYMENT_ID` parameter")
-            # kwargs_mode = (
-            #     {"engine": CONFIG.deployment_name}
-            #     if CONFIG.deployment_name
-            #     else {"deployment_id": CONFIG.deployment_id}
-            # )
-            kwargs_mode = {"model": self.model}
-        else:
             kwargs_mode = {"model": self.model}
         kwargs.update(kwargs_mode)
         return kwargs
