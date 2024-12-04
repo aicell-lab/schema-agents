@@ -319,7 +319,7 @@ class OpenAIGPTAPI(BaseGPTAPI, RateLimiter):
             kwargs["logprobs"] = self.logprobs
         if self.top_logprobs:
             kwargs["top_logprobs"] = self.top_logprobs
-            kwargs_mode = {"model": self.model}
+        kwargs_mode = {"model": self.model}
         kwargs.update(kwargs_mode)
         return kwargs
     
