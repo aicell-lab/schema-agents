@@ -175,7 +175,7 @@ async def _process_stream_response(response):
         )
 
     # Build the complete ChatCompletion object
-    chat_completion = ChatCompletion(
+    response = ChatCompletion(
         id=first_chunk.id,
         choices=choices,
         created=first_chunk.created,
@@ -185,10 +185,10 @@ async def _process_stream_response(response):
         usage=usage_chunk.usage if usage_chunk else None,
     )
 
-    return chat_completion
+    return response
 
 
-async def acompletion(
+async def chat_completion(
     messages: List[Dict[str, Any]],
     client=None,
     model="gpt-4o-mini",
@@ -206,7 +206,7 @@ async def acompletion(
             messages=messages,
             stream=stream,
             model=model,
-            stream_options={"include_usage": True},
+            stream_options={"include_usage": True} if stream else None,
             **kwargs,
         )
 
@@ -252,15 +252,14 @@ async def _main():
     async with create_session_context(
         event_bus=event_bus
     ):
-        response = await acompletion(
+        response = await chat_completion(
             messages,
             tools=tools,
             tool_choice="required",
-            stream=True,
-            model="gpt-4o-mini",
+            stream=False,
+            model="gpt-4o-2024-11-20",
             temperature=0.7,
             max_tokens=150,
-            event_bus=event_bus,
         )
         print(response)
 

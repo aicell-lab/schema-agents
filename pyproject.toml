@@ -3,7 +3,7 @@ requires = ["setuptools", "wheel"]
 
 [project]
 name = "schema-agents"
-version = "0.1.62"
+version = "0.2.0.pre1"
 readme = "README.md"
 description = "A schema-based LLM framework for building multi-agent collaborative systems."
 dependencies = [
@@ -13,7 +13,7 @@ dependencies = [
     "loguru",
     "openapi-pydantic",
     "makefun>=1.15.2",
-    "hypha>=0.20.41.post2",
+    "hypha-rpc>=0.20.41",
     # "jsonschema>=4.0.1",
     # "shortuuid>=1.0.1",
     # "jhub-client",
