@@ -40,6 +40,7 @@ class EventBus:
         self._callbacks = {}
         self._logger = logger
         self.name = name
+        self._tasks = set()  # Add this line to store task references
 
     def on(self, event_name, func):
         """Register an event callback."""
@@ -85,7 +86,9 @@ class EventBus:
         for func in self._callbacks.get(event_name, []):
             try:
                 if inspect.iscoroutinefunction(func):
-                    asyncio.get_running_loop().create_task(func(*data))
+                    task = asyncio.get_running_loop().create_task(func(*data))
+                    self._tasks.add(task)
+                    task.add_done_callback(self._tasks.discard)  # Remove task when done
                 else:
                     func(*data)
                 if hasattr(func, "once"):
