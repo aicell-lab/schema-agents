@@ -11,7 +11,7 @@ async def test_logprobs():
     async def respond_to_user(query: str, role: Role) -> str:
         """Respond to user."""
         messages = [{"role": "user", "content": "How are you today? Anwser YES or NO, nothing else!"}]
-        text, logprops = await role.llm.acompletion(messages, logprobs=True, top_logprobs=3)
+        text, logprops = await role.llm.chat_completion(messages, logprobs=True, top_logprobs=3)
         logprobs_bytes = []
         for prob in logprops:
             logprobs_bytes.extend(prob.bytes)  # Use extend instead of +=

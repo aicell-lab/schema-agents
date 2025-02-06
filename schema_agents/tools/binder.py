@@ -6,6 +6,7 @@ import uuid
 import os
 from jhub_client.api import JupyterKernelAPI, JupyterAPI
 
+# pip install jhub-client aiohttp-sse-client
 # Example code for jhub_client: https://github.com/Quansight/jhub-client/tree/master/tests
 
 class KernelAPI(JupyterKernelAPI):
