@@ -26,7 +26,7 @@ from schema_agents.schema import Message, RoleSetting
 from schema_agents.utils import dict_to_pydantic_model, organize_messages
 from schema_agents.utils.common import EventBus
 from schema_agents.utils.common import create_session_context
-from schema_agents.llm import acompletion
+from schema_agents.llm import chat_completion
 
 
 class ToolExecutionError(BaseModel):
@@ -354,7 +354,13 @@ class Role:
     def _parse_outputs(self, response, output_types=None, parallel_call=None):
         message = response.choices[0].message
         if output_types and not message.tool_calls and message.content:
-            parsed_function_call = json.loads(message.content)
+            content = message.content
+            if content.startswith("```"):
+                # Remove everything up to the first newline
+                content = content.split("\n", 1)[1]
+                # Remove the closing ```
+                content = content.rsplit("```", 1)[0].strip()
+            parsed_function_call = json.loads(content)
             if isinstance(parsed_function_call, dict):
                 message.tool_calls = [
                     ChatCompletionMessageToolCall.model_validate(parsed_function_call)
@@ -802,7 +808,7 @@ class Role:
         messages = [{"role": "system", "content": system_prompt}] + messages
 
         if output_schema is str:
-            response = await acompletion(
+            response = await chat_completion(
                 organize_messages(messages),
                 **self._model_kwargs,
             )
@@ -822,7 +828,7 @@ class Role:
         else:
             tool_choice = "auto"
 
-        response = await acompletion(
+        response = await chat_completion(
             organize_messages(messages),
             tools=tools,
             tool_choice=tool_choice,
@@ -847,7 +853,7 @@ class Role:
                     "content": f"Failed to parse the response, error:\n{traceback.format_exc()}\nPlease regenerate to fix the error.",
                 }
             )
-            response = await acompletion(
+            response = await chat_completion(
                 organize_messages(messages),
                 tools=tools,
                 tool_choice=tool_choice,

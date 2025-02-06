@@ -53,6 +53,10 @@ class Session(BaseModel):
     role_setting: Optional[RoleSetting] = None
     stop: bool = False
     
+    def model_dump(self, **kwargs):
+        # Exclude event_bus from serialization since it's not JSON serializable
+        kwargs.setdefault('exclude', set()).add('event_bus')
+        return super().model_dump(**kwargs)
 
 
 class StreamEvent(BaseModel):
@@ -63,3 +67,9 @@ class StreamEvent(BaseModel):
     content: Optional[str] = None
     name: Optional[str] = None
     arguments: Optional[str] = None
+
+    class Config:
+        # This ensures proper JSON serialization
+        json_encoders = {
+            Session: lambda v: v.model_dump(mode="json") if v else None
+        }
