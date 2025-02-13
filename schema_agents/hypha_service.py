@@ -89,8 +89,8 @@ async def register_agent_service(server):
                 await streaming_callback(response.model_dump(mode="json"))
             event_bus.on("stream", callback)
 
+        tools = []
         if services:
-            tools = []
             service_prompts = []
             for service in services:
                 if isinstance(service, str):
