@@ -105,8 +105,9 @@ async def register_agent_service(server):
                 svcd = service['description'].replace('\n', ' ')
                 service_prompts.append(f" - {svc_id}*: {svcd}\n")
         
-        tool_usage_prompt = "Tool usage guidelines (* represent the prefix of a tool group):\n" + "\n".join(service_prompts)
-
+            tool_usage_prompt = "Tool usage guidelines (* represent the prefix of a tool group):\n" + "\n".join(service_prompts)
+        else:
+            tool_usage_prompt = None
         async with create_session_context(
             event_bus=event_bus
         ):
