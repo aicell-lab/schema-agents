@@ -2,16 +2,15 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
-from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Literal, Optional, Union, AsyncIterator
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field
 from pydantic_graph import BaseNode, Graph, GraphRunContext
 from pydantic_graph.nodes import End
 
 from pydantic_ai import RunContext, models, result, exceptions
 from pydantic_ai.tools import Tool
 from pydantic_ai.messages import ModelMessage, ModelRequest, UserPromptPart, ToolCallPart, ModelResponse, ToolReturnPart, TextPart
-from pydantic_ai._agent_graph import _prepare_request_parameters, GraphAgentState
+from pydantic_ai._agent_graph import _prepare_request_parameters
 from pydantic_ai.usage import Usage, UsageLimits
 from pydantic_ai.settings import ModelSettings
 
@@ -108,10 +107,10 @@ class ThoughtNode(BaseNode[ReasoningState, ReasoningDeps, str]):
         
         # Generate thought about current state
         thought_prompt = (
-            f"Current question: {ctx.deps.prompt}\n"
+            f"Current query: {ctx.deps.prompt}\n"
             f"Previous observation: {ctx.state.last_observation}\n"
             f"Progress so far: {', '.join(ctx.state.intermediate_results)}\n"
-            "What should I do next? Think step by step and when you have the final answer, start your response with 'Final Answer:'. "
+            "What should I do next? Think step by step and when you have the Final Response, start your response with 'Final Response:'. "
             "You can call multiple tools in parallel if needed."
         )
         
@@ -157,7 +156,7 @@ class ThoughtNode(BaseNode[ReasoningState, ReasoningDeps, str]):
         ctx.state.usage.incr(usage)
         ctx.state.message_history.append(response)
         
-        # Check if we have tool calls or final answer
+        # Check if we have tool calls or Final Response
         if response.parts:
             # First check for tool calls
             tool_calls = [p for p in response.parts if isinstance(p, ToolCallPart)]
@@ -169,17 +168,17 @@ class ThoughtNode(BaseNode[ReasoningState, ReasoningDeps, str]):
             text_parts = [p for p in response.parts if isinstance(p, TextPart)]
             if text_parts:
                 content = text_parts[0].content
-                if content.startswith("Final Answer:"):
+                if content.startswith("Final Response:"):
                     return FinalAnswerNode(content)
-                elif "Final Answer:" in content:
-                    # Extract final answer from the content
-                    final_answer = content.split("Final Answer:")[1].strip()
-                    return FinalAnswerNode(f"Final Answer: {final_answer}")
+                elif "Final Response:" in content:
+                    # Extract Final Response from the content
+                    final_answer = content.split("Final Response:")[1].strip()
+                    return FinalAnswerNode(f"Final Response: {final_answer}")
                 else:
-                    # No final answer yet, check for any remaining tool calls
+                    # No Final Response yet, check for any remaining tool calls
                     if tool_calls:
                         return ActionNode(tool_calls[0])
-                    # If no tool calls found, treat as final answer
+                    # If no tool calls found, treat as Final Response
                     return FinalAnswerNode(content)
         
         # No valid response parts, treat as error
@@ -262,11 +261,11 @@ class ObservationNode(BaseNode[ReasoningState, ReasoningDeps, str]):
         
         # Check loop count
         if ctx.state.loop_count >= ctx.deps.strategy.react_config.max_loops:
-            # Create a comprehensive final answer that includes all intermediate results
+            # Create a comprehensive Final Response that includes all intermediate results
             if hasattr(ctx.state, 'intermediate_results') and ctx.state.intermediate_results:
                 final_message = (
-                    f"Completed partial analysis after {ctx.state.loop_count} steps. " +
-                    f"Results: {' '.join(ctx.state.intermediate_results)}. " +
+                    f"Reached maximum number of steps ({ctx.deps.strategy.react_config.max_loops}). " +
+                    f"Results so far: {' '.join(ctx.state.intermediate_results)}. " +
                     f"Latest observation: {self.observation}"
                 )
             else:
@@ -275,25 +274,27 @@ class ObservationNode(BaseNode[ReasoningState, ReasoningDeps, str]):
                     f"Current observation: {self.observation}. " +
                     "Based on the steps taken so far, this appears to be the answer."
                 )
-            return End(final_message)
+            raise ValueError(f"Exceeded maximum loop count ({ctx.deps.strategy.react_config.max_loops}): {final_message}")
             
         return ThoughtNode()
 
 @dataclasses.dataclass
 class FinalAnswerNode(BaseNode[ReasoningState, ReasoningDeps, str]):
-    """Node for producing the final answer."""
+    """Node for producing the Final Response."""
     thought: str
     
     async def run(
         self, 
         ctx: GraphRunContext[ReasoningState, ReasoningDeps]
     ) -> End[str]:
-        # Extract final answer from thought
-        answer_lines = [line for line in self.thought.split("\n") if line.startswith("Final Answer:")]
+        # Extract Final Response from thought
+        answer_lines = [line for line in self.thought.split("\n") if line.startswith("Final Response:")]
         if not answer_lines:
-            return End("No final answer found in thought")
+            # If no "Final Response:" prefix, use the entire thought as the answer
+            final_answer = self.thought
+        else:
+            final_answer = answer_lines[0].replace("Final Response:", "").strip()
             
-        final_answer = answer_lines[0].replace("Final Answer:", "").strip()
         ctx.state.final_answer = final_answer
         return End(final_answer)
 
@@ -423,7 +424,7 @@ async def execute_react_reasoning_stream(
                 yield f"Observation: {state.last_observation}"
         
         elif isinstance(node, FinalAnswerNode):
-            # Process final answer
+            # Process Final Response
             result = await node.run(GraphRunContext(state, deps))
             yield str(result.data)
             break
@@ -468,10 +469,10 @@ class StreamThoughtNode(BaseNode[ReasoningState, ReasoningDeps, str]):
         
         # Generate thought about current state
         thought_prompt = (
-            f"Current question: {ctx.deps.prompt}\n"
+            f"Current query: {ctx.deps.prompt}\n"
             f"Previous observation: {ctx.state.last_observation}\n"
             f"Progress so far: {', '.join(ctx.state.intermediate_results)}\n"
-            "What should I do next? Think step by step and when you have the final answer, start your response with 'Final Answer:'. "
+            "What should I do next? Think step by step and when you have the Final Response, start your response with 'Final Response:'. "
             "You can call multiple tools in parallel if needed."
         )
         
@@ -517,7 +518,7 @@ class StreamThoughtNode(BaseNode[ReasoningState, ReasoningDeps, str]):
         ctx.state.usage.incr(usage)
         ctx.state.message_history.append(response)
         
-        # Check if we have tool calls or final answer
+        # Check if we have tool calls or Final Response
         if response.parts:
             # First check for tool calls
             tool_calls = [p for p in response.parts if isinstance(p, ToolCallPart)]
@@ -529,17 +530,17 @@ class StreamThoughtNode(BaseNode[ReasoningState, ReasoningDeps, str]):
             text_parts = [p for p in response.parts if isinstance(p, TextPart)]
             if text_parts:
                 content = text_parts[0].content
-                if content.startswith("Final Answer:"):
+                if content.startswith("Final Response:"):
                     return FinalAnswerNode(content)
-                elif "Final Answer:" in content:
-                    # Extract final answer from the content
-                    final_answer = content.split("Final Answer:")[1].strip()
-                    return FinalAnswerNode(f"Final Answer: {final_answer}")
+                elif "Final Response:" in content:
+                    # Extract Final Response from the content
+                    final_answer = content.split("Final Response:")[1].strip()
+                    return FinalAnswerNode(f"Final Response: {final_answer}")
                 else:
-                    # No final answer yet, check for any remaining tool calls
+                    # No Final Response yet, check for any remaining tool calls
                     if tool_calls:
                         return ActionNode(tool_calls[0])
-                    # If no tool calls found, treat as final answer
+                    # If no tool calls found, treat as Final Response
                     return FinalAnswerNode(content)
         
         # No valid response parts, treat as error
