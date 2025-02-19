@@ -588,3 +588,74 @@ async def test_agent_with_real_openai_reasoning(openai_model):
     # Verify tool calls
     assert deps.tool_calls.get('calculate', 0) >= 1
     assert deps.tool_calls.get('search_wikipedia', 0) >= 1
+
+@pytest.mark.asyncio
+async def test_react_reasoning_with_streaming():
+    """Test ReAct reasoning strategy with streaming."""
+    # Create agent with ReAct reasoning
+    agent = Agent(
+        model=OpenAIModel(
+            'gpt-4o-mini',
+            api_key=os.getenv('OPENAI_API_KEY')
+        ),
+        name="ReAct Streaming Agent",
+        deps_type=TestDependencies,
+        result_type=str,
+        role="Problem Solver",
+        goal="Solve problems step by step using ReAct reasoning",
+        reasoning_strategy=ReasoningStrategy(
+            type="react",
+            react_config=ReActConfig(
+                max_loops=10,
+                min_confidence=0.8
+            )
+        )
+    )
+    
+    # Add tools
+    @agent.tool
+    async def search_wikipedia(ctx: RunContext[TestDependencies], query: str) -> str:
+        """Search Wikipedia for information."""
+        ctx.deps.record_tool_call('search_wikipedia')
+        return f"Wikipedia results for: {query}"
+
+    @agent.tool
+    async def calculate(ctx: RunContext[TestDependencies], expression: str) -> float:
+        """Calculate a mathematical expression."""
+        ctx.deps.record_tool_call('calculate')
+        return eval(expression)
+    
+    deps = TestDependencies()
+    
+    # Test with a simple math problem using streaming
+    chunks = []
+    final_result = None
+    async with agent.run_stream(
+        "What is 25 * 48? Then find information about the number in Wikipedia.",
+        deps=deps
+    ) as response:
+        try:
+            async for chunk in response._stream_response:
+                chunks.append(chunk)
+                if isinstance(chunk, ModelResponse):
+                    final_result = chunk.parts[0].content
+                else:
+                    final_result = chunk
+        except Exception as e:
+            # For ReAct reasoning, we'll get the data directly
+            try:
+                final_result = response.data
+            except AttributeError:
+                # If no data attribute, use the last chunk
+                if chunks:
+                    final_result = chunks[-1]
+    
+    # Verify result
+    assert isinstance(final_result, str)
+    assert "1200" in final_result
+    assert "Wikipedia" in final_result
+    assert len(chunks) > 0
+    
+    # Verify tool calls
+    assert deps.tool_calls.get('calculate', 0) >= 1
+    assert deps.tool_calls.get('search_wikipedia', 0) >= 1
