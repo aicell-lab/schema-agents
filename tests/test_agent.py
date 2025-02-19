@@ -1,6 +1,7 @@
 import os
 import pytest
 import asyncio
+import dataclasses
 from dataclasses import dataclass
 from typing import List, Optional, Dict, Union, Tuple, Any
 from pydantic import BaseModel, Field
@@ -11,7 +12,8 @@ from pydantic_ai.messages import ModelMessage, ModelRequest, ModelResponse, Text
 from pydantic_ai.usage import Usage
 from pydantic_ai.tools import Tool
 
-from schema_agents.agent import Agent, AgentConfig
+from schema_agents.agent import Agent
+from schema_agents.reasoning import ReasoningStrategy, ReActConfig
 
 # Load environment variables
 load_dotenv()
@@ -40,11 +42,13 @@ class TestDependencies:
     history: List[str]
     context: Dict[str, str]
     vector_store: Optional[Dict] = None
+    tool_calls: Dict[str, int] = dataclasses.field(default_factory=dict)
     
     def __init__(self):
         self.history = []
         self.context = {}
         self.vector_store = {}
+        self.tool_calls = {}
     
     async def add_to_history(self, entry: str):
         self.history.append(entry)
@@ -58,6 +62,10 @@ class TestDependencies:
     async def search_vectors(self, query_vector: List[float], top_k: int = 3) -> List[str]:
         # Simulate vector search
         return list(self.vector_store.keys())[:top_k]
+    
+    def record_tool_call(self, tool_name: str):
+        """Record a tool call."""
+        self.tool_calls[tool_name] = self.tool_calls.get(tool_name, 0) + 1
 
 # Fixtures
 @pytest.fixture
@@ -71,33 +79,27 @@ def openai_model():
 @pytest.fixture
 def test_agent(openai_model):
     """Create a basic test agent with OpenAI model"""
-    config = AgentConfig(
-        role="Test Assistant",
-        goal="Help with testing the agent implementation",
-        backstory="You are an AI assistant helping with testing."
-    )
     return Agent(
         model=openai_model,
         name="Test Agent",
         deps_type=TestDependencies,
         result_type=str,
-        config=config
+        role="Test Assistant",
+        goal="Help with testing the agent implementation",
+        backstory="You are an AI assistant helping with testing."
     )
 
 @pytest.fixture
 def structured_agent(openai_model):
     """Create an agent with structured output using OpenAI model"""
-    config = AgentConfig(
-        role="Analysis Assistant",
-        goal="Provide structured analysis results",
-        backstory="You are an AI assistant that provides structured analysis."
-    )
     return Agent(
         model=openai_model,
         name="Structured Agent",
         deps_type=TestDependencies,
         result_type=AnalysisResult,
-        config=config
+        role="Analysis Assistant",
+        goal="Provide structured analysis results",
+        backstory="You are an AI assistant that provides structured analysis."
     )
 
 @pytest.fixture
@@ -230,32 +232,6 @@ async def test_agent_with_vector_memory(openai_model):
         deps=deps
     )
     assert isinstance(result.data, str)
-
-@pytest.mark.asyncio
-async def test_agent_with_reasoning_strategy(openai_model):
-    """Test agent with reasoning strategy configuration"""
-    reasoning_config = ReasoningConfig(
-        type=["react", "cot"],
-        max_steps=2,
-        min_confidence=0.9,
-        reflection_rounds=1
-    )
-    
-    config = AgentConfig(reasoning_config=reasoning_config)
-    agent = Agent(
-        model=openai_model,
-        name="Reasoning Agent",
-        deps_type=TestDependencies,
-        result_type=str,
-        config=config
-    )
-    
-    result = await agent.run(
-        "Solve this complex problem: what is 2+2?",
-        deps=TestDependencies()
-    )
-    assert isinstance(result.data, str)
-    assert "4" in result.data
 
 @pytest.mark.asyncio
 async def test_agent_with_dynamic_tools(openai_model):
@@ -562,3 +538,53 @@ async def test_agent_override(openai_model):
     
     assert isinstance(result1.data, str)
     assert isinstance(result2.data, str)
+
+@pytest.mark.asyncio
+async def test_agent_with_real_openai_reasoning(openai_model):
+    """Test reasoning strategy with real OpenAI model."""
+    # Create agent with ReAct reasoning
+    agent = Agent(
+        model=openai_model,
+        name="Real OpenAI ReAct Agent",
+        deps_type=TestDependencies,
+        result_type=str,
+        role="Problem Solver",
+        goal="Solve problems step by step using ReAct reasoning",
+        reasoning_strategy=ReasoningStrategy(
+            type="react",
+            react_config=ReActConfig(
+                max_loops=10,
+                min_confidence=0.8
+            )
+        )
+    )
+    
+    # Add tools
+    async def search_wikipedia(ctx: RunContext[TestDependencies], query: str) -> str:
+        """Search Wikipedia for information."""
+        ctx.deps.record_tool_call('search_wikipedia')
+        return f"Wikipedia results for: {query}"
+
+    async def calculate(ctx: RunContext[TestDependencies], expression: str) -> float:
+        """Calculate a mathematical expression."""
+        ctx.deps.record_tool_call('calculate')
+        return eval(expression)
+    
+    tools = [search_wikipedia, calculate]
+    deps = TestDependencies()
+    
+    # Test with a simple math problem
+    result = await agent.run(
+        "What is 25 * 48? Then find information about the number in Wikipedia.",
+        deps=deps,
+        tools=tools
+    )
+    
+    # Verify result
+    assert isinstance(result.data, str)
+    assert "1200" in result.data
+    assert "Wikipedia" in result.data
+    
+    # Verify tool calls
+    assert deps.tool_calls.get('calculate', 0) >= 1
+    assert deps.tool_calls.get('search_wikipedia', 0) >= 1
