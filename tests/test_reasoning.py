@@ -1,8 +1,6 @@
 import pytest
-import asyncio
 from dataclasses import dataclass
-from typing import List, Optional, Dict, Any, Tuple
-from pydantic import BaseModel, Field
+from typing import List, Dict, Any, Tuple
 
 from pydantic_ai import RunContext, models, result, exceptions
 from pydantic_ai.messages import ModelMessage, ModelRequest, ModelResponse, TextPart, ToolReturnPart, ToolCallPart
@@ -72,8 +70,8 @@ class ReActMockModel(models.Model):
         
         # Extract current question and observation
         content = last_message.parts[0].content
-        if "Current question: " in content:
-            question = content.split("Current question: ")[1].split("\n")[0]
+        if "Current query: " in content:
+            question = content.split("Current query: ")[1].split("\n")[0]
             observation = content.split("Previous observation: ")[1].split("\n")[0]
             if observation == "None":
                 observation = None
@@ -141,7 +139,7 @@ class ReActMockModel(models.Model):
         
         # Default response
         return ModelResponse(
-            parts=[TextPart(content="I don't know how to help with that.")],
+            parts=[TextPart(content="Let me help you with that step by step.")],
             model_name=self.model_name
         ), Usage()
 
@@ -228,7 +226,7 @@ async def test_react_with_max_loops():
             tools=tools
         )
     
-    assert "max loop count" in str(exc_info.value).lower()
+    assert "exceeded maximum loop count" in str(exc_info.value).lower()
     # Verify we made some tool calls before hitting the limit
     assert deps.tool_calls.get('calculate', 0) > 0
 

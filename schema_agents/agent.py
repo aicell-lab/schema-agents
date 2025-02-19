@@ -2,18 +2,16 @@ from __future__ import annotations
 
 import asyncio
 import copy
-import dataclasses
 from contextlib import asynccontextmanager
-from typing import Any, Dict, List, Optional, Type, TypeVar, Union, cast, Callable, AsyncIterator, AsyncGenerator
+from typing import Any, Dict, List, Type, TypeVar, Union, AsyncIterator
 
 from pydantic import BaseModel, ValidationError, Field
 from pydantic_ai import Agent as PydanticAgent
 from pydantic_ai import RunContext, models, result, exceptions
-from pydantic_ai.models.openai import OpenAIModel
-from pydantic_ai.tools import AgentDepsT, Tool, ToolFuncEither, ToolDefinition
+from pydantic_ai.tools import ToolPrepareFunc, AgentDepsT, Tool, ToolFuncEither, ToolDefinition
 from pydantic.fields import PydanticUndefined
-from pydantic_ai.messages import ModelMessage, ModelRequest, ModelResponse, TextPart, ToolReturnPart, ToolCallPart
-from pydantic_ai.usage import Usage
+from pydantic_ai.messages import ModelResponse, TextPart
+from schema_agents.reasoning import ReasoningStrategy
 
 ResultDataT = TypeVar('ResultDataT')
 RunResultDataT = TypeVar('RunResultDataT')

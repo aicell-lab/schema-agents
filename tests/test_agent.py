@@ -641,14 +641,9 @@ async def test_react_reasoning_with_streaming():
                     final_result = chunk.parts[0].content
                 else:
                     final_result = chunk
+                print(chunk)
         except Exception as e:
-            # For ReAct reasoning, we'll get the data directly
-            try:
-                final_result = response.data
-            except AttributeError:
-                # If no data attribute, use the last chunk
-                if chunks:
-                    final_result = chunks[-1]
+            final_result = await response.get_data()
     
     # Verify result
     assert isinstance(final_result, str)
