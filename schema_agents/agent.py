@@ -4,14 +4,16 @@ import asyncio
 import copy
 import dataclasses
 from contextlib import asynccontextmanager
-from typing import Any, Dict, List, Optional, Type, TypeVar, Union, cast, Callable, AsyncIterator
+from typing import Any, Dict, List, Optional, Type, TypeVar, Union, cast, Callable, AsyncIterator, AsyncGenerator
 
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, ValidationError, Field
 from pydantic_ai import Agent as PydanticAgent
 from pydantic_ai import RunContext, models, result, exceptions
 from pydantic_ai.models.openai import OpenAIModel
 from pydantic_ai.tools import AgentDepsT, Tool, ToolFuncEither, ToolDefinition
 from pydantic.fields import PydanticUndefined
+from pydantic_ai.messages import ModelMessage, ModelRequest, ModelResponse, TextPart, ToolReturnPart, ToolCallPart
+from pydantic_ai.usage import Usage
 
 ResultDataT = TypeVar('ResultDataT')
 RunResultDataT = TypeVar('RunResultDataT')
@@ -26,14 +28,6 @@ def _build_system_prompt(role: str | None, goal: str | None, backstory: str | No
     if backstory:
         parts.append(f"Backstory: {backstory}")
     return "\n".join(parts)
-
-@dataclasses.dataclass
-class AgentConfig:
-    """Configuration for Schema Agent."""
-    role: str | None = None
-    goal: str | None = None
-    backstory: str | None = None
-    reasoning_config: BaseModel | None = None
 
 class Agent(PydanticAgent[AgentDepsT, ResultDataT]):
     """Schema Agents Platform Agent implementation.
@@ -51,7 +45,10 @@ class Agent(PydanticAgent[AgentDepsT, ResultDataT]):
         name: str | None = None,
         result_type: Type[ResultDataT] = str,
         deps_type: Type[AgentDepsT] = type(None),
-        config: AgentConfig | None = None,
+        role: str | None = None,
+        goal: str | None = None,
+        backstory: str | None = None,
+        reasoning_strategy: ReasoningStrategy | None = None,
         **kwargs
     ):
         """Initialize a Schema Agent.
@@ -61,20 +58,14 @@ class Agent(PydanticAgent[AgentDepsT, ResultDataT]):
             name: Agent name
             result_type: Expected result type
             deps_type: Dependencies type
-            config: Optional agent configuration
+            role: Agent role description
+            goal: Agent goal description
+            backstory: Agent backstory
+            reasoning_strategy: Optional reasoning strategy configuration
             **kwargs: Additional arguments passed to PydanticAgent
         """
-        # Create config from kwargs if not provided
-        if config is None:
-            config = AgentConfig(
-                role=kwargs.pop('role', None),
-                goal=kwargs.pop('goal', None),
-                backstory=kwargs.pop('backstory', None),
-                reasoning_config=kwargs.pop('reasoning_config', None)
-            )
-
         # Build system prompt from config
-        system_prompt = _build_system_prompt(config.role, config.goal, config.backstory)
+        system_prompt = _build_system_prompt(role, goal, backstory)
         if system_prompt:
             kwargs['system_prompt'] = system_prompt
 
@@ -88,7 +79,10 @@ class Agent(PydanticAgent[AgentDepsT, ResultDataT]):
         )
         
         # Store config
-        self.config = config
+        self.role = role
+        self.goal = goal
+        self.backstory = backstory
+        self.reasoning_strategy = reasoning_strategy
         
         # Initialize message history
         self._message_history: List[Dict[str, Any]] = []
@@ -127,42 +121,88 @@ class Agent(PydanticAgent[AgentDepsT, ResultDataT]):
                     agent_copy._register_tool(tool)
                 else:
                     agent_copy._register_tool(Tool(tool))
-        
+
         try:
-            # Run with the copied agent
-            result = await super(Agent, agent_copy).run(
-                user_prompt,
-                result_type=result_type,
-                message_history=message_history,
-                model=model,
-                deps=deps,
-                **kwargs
-            )
+            # Check if we should use reasoning strategy
+            if self.reasoning_strategy:
+                strategy = self.reasoning_strategy
+                model_used = self._get_model(model)
+                usage_obj = result.Usage()
+                run_context = RunContext(
+                    deps=deps,
+                    model=model_used,
+                    usage=usage_obj,
+                    prompt=user_prompt,
+                    messages=message_history or [],
+                    run_step=0
+                )
+
+                # Execute reasoning strategy
+                if isinstance(strategy.type, str):
+                    strategy_types = [strategy.type]
+                else:
+                    strategy_types = strategy.type
+
+                final_answer = None
+                for strategy_type in strategy_types:
+                    if strategy_type == "react":
+                        if not strategy.react_config:
+                            raise ValueError("ReAct strategy selected but no react_config provided")
+                        from schema_agents.reasoning import execute_react_reasoning
+                        final_answer = await execute_react_reasoning(
+                            user_prompt,
+                            model_used,
+                            list(agent_copy._function_tools.values()),
+                            strategy,
+                            run_context
+                        )
+                    # Add other strategy types here
+                    else:
+                        raise ValueError(f"Unknown strategy type: {strategy_type}")
+
+                # Create a RunResult with the final answer
+                run_result = result.RunResult(
+                    message_history or [],
+                    len(message_history) if message_history else 0,
+                    final_answer,
+                    None,  # No tool name for reasoning results
+                    run_context.usage
+                )
+            else:
+                # Run with the copied agent without reasoning strategy
+                run_result = await super(Agent, agent_copy).run(
+                    user_prompt,
+                    result_type=result_type,
+                    message_history=message_history,
+                    model=model,
+                    deps=deps,
+                    **kwargs
+                )
 
             # Validate result type
             if result_type:
                 try:
-                    if not isinstance(result.data, result_type):
+                    if not isinstance(run_result.data, result_type):
                         # Try to parse the result as the expected type
                         if issubclass(result_type, BaseModel):
-                            result.data = result_type.model_validate(result.data)
+                            run_result.data = result_type.model_validate(run_result.data)
                         else:
-                            raise exceptions.UserError(f"Invalid response type: expected {result_type.__name__}, got {type(result.data).__name__}")
+                            raise exceptions.UserError(f"Invalid response type: expected {result_type.__name__}, got {type(run_result.data).__name__}")
                 except ValidationError as e:
                     raise exceptions.UserError(f"Invalid response format: {str(e)}")
 
             # Update history if deps has history attribute
             if deps and hasattr(deps, 'history'):
                 await deps.add_to_history(user_prompt)
-                if isinstance(result.data, str):
-                    await deps.add_to_history(result.data)
+                if isinstance(run_result.data, str):
+                    await deps.add_to_history(run_result.data)
                 else:
-                    await deps.add_to_history(str(result.data))
+                    await deps.add_to_history(str(run_result.data))
 
             # Update internal message history
-            self._message_history.extend(result._all_messages)
+            self._message_history.extend(run_result._all_messages)
 
-            return result
+            return run_result
         except Exception as e:
             # Wrap exceptions to ensure consistent error handling
             if isinstance(e, exceptions.ModelRetry):
@@ -395,34 +435,83 @@ class Agent(PydanticAgent[AgentDepsT, ResultDataT]):
                     agent_copy._register_function(tool, False, None, None, 'auto', False)
         
         try:
-            # Run with the copied agent
-            async with super(Agent, agent_copy).run_stream(
-                user_prompt,
-                result_type=result_type,
-                message_history=message_history,
-                model=model,
-                deps=deps,
-                **kwargs
-            ) as response:
-                # Update history if deps has history attribute
-                if deps and hasattr(deps, 'history'):
-                    await deps.add_to_history(user_prompt)
-                yield response
+            # Check if we should use reasoning strategy
+            if self.reasoning_strategy:
+                strategy = self.reasoning_strategy
+                model_used = self._get_model(model)
+                usage_obj = result.Usage()
+                run_context = RunContext(
+                    deps=deps,
+                    model=model_used,
+                    usage=usage_obj,
+                    prompt=user_prompt,
+                    messages=message_history or [],
+                    run_step=0
+                )
 
-                # Validate result type
-                if result_type:
-                    try:
-                        if not isinstance(response.data, result_type):
-                            # Try to parse the result as the expected type
-                            if issubclass(result_type, BaseModel):
-                                response.data = result_type.model_validate(response.data)
-                            else:
-                                raise exceptions.UserError(f"Invalid response type: expected {result_type.__name__}, got {type(response.data).__name__}")
-                    except ValidationError as e:
-                        raise exceptions.UserError(f"Invalid response format: {str(e)}")
+                # Execute reasoning strategy with streaming
+                if isinstance(strategy.type, str):
+                    strategy_types = [strategy.type]
+                else:
+                    strategy_types = strategy.type
 
-                # Update internal message history after streaming completes
-                self._message_history.extend(response._all_messages)
+                for strategy_type in strategy_types:
+                    if strategy_type == "react":
+                        if not strategy.react_config:
+                            raise ValueError("ReAct strategy selected but no react_config provided")
+                        from schema_agents.reasoning import execute_react_reasoning
+                        
+                        # Create a StreamedRunResult for the ReAct reasoning
+                        streamed_result = result.StreamedRunResult(
+                            message_history or [],
+                            len(message_history) if message_history else 0,
+                            None,  # No usage limits for now
+                            None,  # No result stream yet
+                            None,  # No result schema
+                            run_context,
+                            [],  # No result validators
+                            None,  # No tool name
+                            None,  # No on_complete callback
+                        )
+                        
+                        # Start the ReAct reasoning with streaming
+                        stream = await execute_react_reasoning(
+                            user_prompt,
+                            model_used,
+                            list(agent_copy._function_tools.values()),
+                            strategy,
+                            run_context,
+                            stream=True
+                        )
+                        
+                        # Create a ModelResponse for streaming
+                        async def stream_generator():
+                            async for chunk in stream:
+                                # Update the streamed result with the new chunk
+                                streamed_result.data = chunk
+                                yield ModelResponse(parts=[TextPart(content=chunk)], model_name=model_used.model_name)
+                        
+                        # Create a StreamedResponse
+                        streamed_result._stream_response = stream_generator()
+                        yield streamed_result
+                        
+                        # Consume the stream to ensure it completes
+                        async for _ in stream_generator():
+                            pass
+                    else:
+                        raise ValueError(f"Unknown strategy type: {strategy_type}")
+            else:
+                # Run with the copied agent without reasoning strategy
+                async with super(Agent, agent_copy).run_stream(
+                    user_prompt,
+                    result_type=result_type,
+                    message_history=message_history,
+                    model=model,
+                    deps=deps,
+                    **kwargs
+                ) as response:
+                    yield response
+
         except Exception as e:
             # Wrap exceptions to ensure consistent error handling
             if isinstance(e, exceptions.ModelRetry):
