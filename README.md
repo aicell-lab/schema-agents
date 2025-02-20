@@ -777,7 +777,6 @@ agent = Agent(
     model=model,
     name="Code Assistant",
     instructions="You are a helpful coding assistant.",
-    model=model
 )
 
 # Use the agent
@@ -803,7 +802,6 @@ agent = Agent(
     model=model,
     name="General Assistant",
     instructions="You are a helpful assistant.",
-    model=model
 )
 
 # Use the agent
