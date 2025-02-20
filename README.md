@@ -38,16 +38,19 @@ Monolithic agent frameworks struggle with resource fragmentation, limited tool d
 ### 🤖 Intelligent Agent Ecosystem
 - **Pydantic AI Foundation:** Built on top of Pydantic AI's robust agent framework with extended capabilities for distributed computing and service management.
 - **Rich Agent Configuration:** Configure agents with name, role, goal, backstory, and reasoning strategies for sophisticated behavior.
-- **Advanced Reasoning Strategies:** Support for multiple reasoning approaches including ReAct, Chain of Thought (CoT), Tree of Thoughts (ToT), and Self-Reflection (SR).
+- **Advanced Reasoning Strategies:** Support for ReAct (Reasoning+Acting) strategy with streaming output and configurable parameters.
 - **Concurrent Safety:** Built-in protection against race conditions during parallel agent execution through agent forking.
 - **Message History:** Integrated message tracking for maintaining conversation context and tool interactions.
 - **Streaming Support:** Native support for streaming responses during agent execution and reasoning.
 
 ### 🧠 Reasoning Capabilities
-- **Multiple Strategy Types:** Choose from ReAct, Chain of Thought, Tree of Thoughts, and Self-Reflection strategies.
-- **Strategy Composition:** Combine multiple strategies for complex reasoning tasks.
-- **Configurable Parameters:** Fine-tune strategy behavior with parameters like max steps, confidence thresholds, and temperature.
+- **ReAct Strategy:** Implement the ReAct (Reasoning+Acting) pattern for systematic problem-solving.
+- **Configurable Parameters:** Fine-tune ReAct behavior with parameters like max loops, confidence thresholds, and temperature.
 - **Streaming Execution:** Stream intermediate thoughts, actions, and observations during reasoning.
+- **Future Strategies (TODO):**
+  - Chain of Thought (CoT): Step-by-step reasoning
+  - Tree of Thoughts (ToT): Branching decision paths
+  - Self-Reflection (SR): Iterative improvement through reflection
 
 ### 🛠️ Tool Integration
 - **Runtime Tool Attachment:** Dynamically add tools during agent execution.
@@ -99,10 +102,14 @@ graph TD
    - Supports concurrent execution through agent forking
 
 2. **Reasoning Engine**
-   - Implements multiple reasoning strategies (ReAct, CoT, ToT, SR)
+   - Implements ReAct (Reasoning+Acting) strategy
    - Manages thought process and action execution
    - Supports streaming of intermediate steps
    - Configurable parameters for fine-tuning
+   - Future strategies planned:
+     - Chain of Thought (CoT)
+     - Tree of Thoughts (ToT)
+     - Self-Reflection (SR)
 
 3. **Tool System**
    - Schema-based tool definition using Pydantic
@@ -138,13 +145,37 @@ graph TD
    ```python
    class ReasoningStrategy(BaseModel):
        """Container for reasoning strategy configuration."""
-       type: Union[str, List[str]]  # Strategy type(s)
+       type: Literal["react"]  # Currently only supports "react"
        react_config: Optional[ReActConfig] = None
-       cot_config: Optional[CoTConfig] = None
-       tot_config: Optional[ToTConfig] = None
-       sr_config: Optional[SRConfig] = None
        temperature: float = 0.7
        max_tokens: Optional[int] = 2000
+   ```
+
+   **ReAct Configuration**
+   ```python
+   class ReActConfig(BaseModel):
+       """Configuration for ReAct reasoning."""
+       max_loops: int = 5  # Maximum reasoning cycles
+       min_confidence: float = 0.8  # Minimum confidence threshold
+   ```
+
+   **Future Strategy Types (TODO)**
+   ```python
+   # Chain of Thought (CoT)
+   class CoTConfig(BaseModel):
+       max_steps: int
+       step_prefix: str
+
+   # Tree of Thoughts (ToT)
+   class ToTConfig(BaseModel):
+       max_branches: int
+       max_depth: int
+       min_branch_score: float
+
+   # Self-Reflection (SR)
+   class SRConfig(BaseModel):
+       reflection_rounds: int
+       reflection_criteria: List[str]
    ```
 
 3. **Schema Tool**
@@ -278,7 +309,7 @@ result = await math_service.run("Calculate 10 * 5")
 
 ### Using Reasoning Strategies
 
-Configure advanced reasoning capabilities:
+Configure ReAct reasoning capabilities:
 
 ```python
 from schema_agents import ReasoningStrategy, ReActConfig
@@ -302,6 +333,25 @@ agent = Agent(
 # The agent will use ReAct reasoning for complex tasks
 result = await agent.run("Analyze this dataset and explain your thought process")
 ```
+
+**Future Reasoning Strategies (TODO)**
+
+The following strategies are planned for future implementation:
+
+1. **Chain of Thought (CoT)**
+   - Step-by-step reasoning process
+   - Explicit intermediate steps
+   - Better transparency in decision-making
+
+2. **Tree of Thoughts (ToT)**
+   - Branching decision paths
+   - Parallel exploration of options
+   - Backtracking capability
+
+3. **Self-Reflection (SR)**
+   - Iterative improvement through reflection
+   - Quality assessment of responses
+   - Learning from past interactions
 
 ### Runtime Tool Attachment
 
@@ -609,14 +659,10 @@ class SRConfig(BaseModel):
 # Define the strategy container
 class ReasoningStrategy(BaseModel):
     """Container for reasoning strategy configuration"""
-    type: Union[Literal["react", "cot", "tot", "sr"], List[Literal["react", "cot", "tot", "sr"]]]
+    type: Union[Literal["react"], List[Literal["react"]]]
     react_config: Optional[ReActConfig] = None
-    cot_config: Optional[CoTConfig] = None
-    tot_config: Optional[ToTConfig] = None
-    sr_config: Optional[SRConfig] = None
-    verbose: bool = Field(True, description="Show reasoning steps")
-    max_tokens: Optional[int] = Field(2000, description="Maximum response length")
     temperature: float = Field(0.7, description="Response creativity")
+    max_tokens: Optional[int] = Field(2000, description="Maximum response length")
 
 # Example usage with single strategy
 research_agent = Agent(
@@ -687,34 +733,15 @@ result = await agent.run(
 
 The strategy system provides several benefits:
 1. **Type Safety:** All configurations are validated through Pydantic
-2. **Composability:** Combine multiple strategies with proper configurations
-3. **Extensibility:** Easy to add new strategies and configurations
-4. **Reusability:** Create custom strategy compositions for specific use cases
+2. **Configurable Parameters:** Fine-tune ReAct behavior with parameters like max loops and confidence thresholds
+3. **Extensibility:** Easy to add new strategies in future updates
+4. **Streaming Support:** Stream intermediate thoughts and actions during reasoning
 
-Each strategy type has its own configuration parameters:
-
-#### ReAct Configuration
+ReAct Configuration Parameters:
 - `max_loops`: Maximum reasoning cycles
 - `min_confidence`: Minimum confidence threshold
-- `timeout`: Maximum execution time
-
-#### Chain of Thought Configuration
-- `max_steps`: Maximum reasoning steps
-- `step_prefix`: Prefix for each step
-
-#### Tree of Thoughts Configuration
-- `max_branches`: Maximum parallel branches
-- `max_depth`: Maximum depth per branch
-- `min_branch_score`: Minimum score to explore branch
-
-#### Self-Reflection Configuration
-- `reflection_rounds`: Number of improvement iterations
-- `reflection_criteria`: Aspects to reflect on
-
-Common parameters across all strategies:
-- `verbose`: Show reasoning steps
+- `temperature`: Response creativity (0-1)
 - `max_tokens`: Maximum response length
-- `temperature`: Response creativity
 
 
 ## Supported Language Models
