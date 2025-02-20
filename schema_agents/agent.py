@@ -81,9 +81,16 @@ class Agent(PydanticAgent[AgentDepsT, ResultDataT]):
         self.goal = goal
         self.backstory = backstory
         self.reasoning_strategy = reasoning_strategy
+        self._model = model  # Store the model instance
+        self._deps_type = deps_type  # Store deps_type
         
         # Initialize message history
         self._message_history: List[Dict[str, Any]] = []
+
+    @property
+    def deps_type(self) -> Type[AgentDepsT]:
+        """Get the dependencies type."""
+        return self._deps_type
 
     async def run(
         self,
@@ -233,6 +240,101 @@ class Agent(PydanticAgent[AgentDepsT, ResultDataT]):
                 **kwargs
             )
         )
+
+    async def register(self, server, service_id: str | None = None, workspace: str | None = None):
+        """Register the agent as a Hypha service.
+        
+        Args:
+            server: The Hypha server instance to register with
+            service_id: Optional service ID, defaults to agent name if not provided
+            workspace: Optional workspace to register in
+        
+        Returns:
+            The registered service object
+        """
+        # Create service ID from agent name if not provided
+        if not service_id:
+            service_id = self.name.lower().replace(" ", "-")
+
+        # Create a wrapper for the run method that handles both streaming and non-streaming
+        deps_type = self.deps_type  # Store deps_type for closure
+        async def run_wrapper(user_prompt: str, callback=None, *, deps=None, context=None, **kwargs):
+            """Wrapper for run that handles dependencies and optional streaming"""
+            # Convert dict to deps instance if needed
+            if deps is not None:
+                if isinstance(deps, dict):
+                    deps = deps_type.model_validate(deps)
+                elif hasattr(deps, 'model_dump'):
+                    # If it's already a pydantic model, convert to dict and back to ensure proper validation
+                    deps = deps_type.model_validate(deps.model_dump())
+                elif hasattr(deps, '__dict__'):
+                    # If it's a dataclass, convert to dict and back
+                    deps = deps_type(**deps.__dict__)
+
+            if callback:
+                # Streaming mode
+                async with self.run_stream(user_prompt, deps=deps, **kwargs) as response:
+                    async for chunk in response._stream_response:
+                        if isinstance(chunk, ModelResponse):
+                            for part in chunk.parts:
+                                if isinstance(part, TextPart):
+                                    await callback({
+                                        "type": "text",
+                                        "content": part.content,
+                                        "model": chunk.model_name
+                                    })
+                        else:
+                            # For non-ModelResponse chunks (e.g. from reasoning strategies)
+                            await callback({
+                                "type": "text",
+                                "content": str(chunk),
+                                "model": self._model.model_name if self._model else None
+                            })
+                    result = await response.get_data()
+                    if hasattr(result, 'model_dump'):
+                        return result.model_dump()
+                    return result
+            else:
+                # Non-streaming mode
+                result = await self.run(user_prompt, deps=deps, **kwargs)
+                if hasattr(result.data, 'model_dump'):
+                    return result.data.model_dump()
+                return result.data
+
+        # Prepare tool metadata
+        tools_meta = []
+        if self._function_tools:
+            for tool in self._function_tools.values():
+                # Get tool definition
+                tool_def = await tool.prepare_tool_def(None)
+                if tool_def:
+                    tools_meta.append({
+                        "name": tool_def.name,
+                        "description": tool_def.description,
+                        "parameters": tool_def.parameters_json_schema
+                    })
+
+        # Register the service
+        service_info = await server.register_service({
+            "id": service_id,
+            "name": self.name,
+            "description": f"Agent service for {self.name} ({self.role})",
+            "docs": f"Name: {self.name}\nRole: {self.role}\nGoal: {self.goal}\nBackstory: {self.backstory}",
+            "config": {
+                "visibility": "public",
+                "require_context": True
+            },
+            "role": self.role,
+            "goal": self.goal,
+            "backstory": self.backstory,
+            "reasoning_strategy": self.reasoning_strategy.model_dump() if self.reasoning_strategy else None,
+            "result_type": self.result_type.__name__ if self.result_type else None,
+            "tools": tools_meta,
+            "model": str(self._model) if self._model else None,
+            "run": run_wrapper,
+        })
+
+        return service_info
 
     def _fork_agent(self) -> Agent[AgentDepsT, ResultDataT]:
         """Create a copy of the agent with independent tool state.
@@ -487,14 +589,17 @@ class Agent(PydanticAgent[AgentDepsT, ResultDataT]):
                             async for chunk in stream:
                                 # Update the streamed result with the new chunk
                                 streamed_result.data = chunk
-                                yield ModelResponse(parts=[TextPart(content=chunk)], model_name=model_used.model_name)
+                                if isinstance(chunk, ModelResponse):
+                                    yield chunk
+                                else:
+                                    yield ModelResponse(parts=[TextPart(content=str(chunk))], model_name=model_used.model_name)
                         
                         # Create a StreamedResponse
                         streamed_result._stream_response = stream_generator()
                         yield streamed_result
                         
                         # Consume the stream to ensure it completes
-                        async for _ in stream_generator():
+                        async for _ in streamed_result._stream_response:
                             pass
                     else:
                         raise ValueError(f"Unknown strategy type: {strategy_type}")

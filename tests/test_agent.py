@@ -2,7 +2,7 @@ import os
 import pytest
 import asyncio
 import dataclasses
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
 from typing import List, Optional, Dict, Union, Tuple, Any
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
@@ -14,6 +14,7 @@ from pydantic_ai.tools import Tool
 
 from schema_agents.agent import Agent
 from schema_agents.reasoning import ReasoningStrategy, ReActConfig
+from hypha_rpc import connect_to_server
 
 # Load environment variables
 load_dotenv()
@@ -23,9 +24,9 @@ models.ALLOW_MODEL_REQUESTS = True
 
 # Test Models and Dependencies
 class AnalysisResult(BaseModel):
-    """Test model for structured agent output"""
+    """Structured output for analysis results."""
     message: str = Field(..., description="Analysis message")
-    confidence: float = Field(..., ge=0, le=1, description="Confidence score")
+    confidence: float = Field(..., description="Confidence score between 0 and 1")
     tags: List[str] = Field(default_factory=list, description="Analysis tags")
     metadata: Optional[Dict] = Field(None, description="Additional metadata")
 
@@ -36,19 +37,12 @@ class ReasoningConfig(BaseModel):
     min_confidence: float = Field(0.8, description="Minimum confidence threshold")
     reflection_rounds: Optional[int] = Field(None, description="Number of reflection rounds")
 
-@dataclass
-class TestDependencies:
+class TestDependencies(BaseModel):
     """Test dependencies for agent"""
-    history: List[str]
-    context: Dict[str, str]
-    vector_store: Optional[Dict] = None
-    tool_calls: Dict[str, int] = dataclasses.field(default_factory=dict)
-    
-    def __init__(self):
-        self.history = []
-        self.context = {}
-        self.vector_store = {}
-        self.tool_calls = {}
+    history: List[str] = Field(default_factory=list)
+    context: Dict[str, str] = Field(default_factory=dict)
+    vector_store: Optional[Dict] = Field(default_factory=dict)
+    tool_calls: Dict[str, int] = Field(default_factory=dict)
     
     async def add_to_history(self, entry: str):
         self.history.append(entry)
@@ -641,7 +635,6 @@ async def test_react_reasoning_with_streaming():
                     final_result = chunk.parts[0].content
                 else:
                     final_result = chunk
-                print(chunk)
         except Exception as e:
             final_result = await response.get_data()
     
