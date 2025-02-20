@@ -36,10 +36,24 @@ Monolithic agent frameworks struggle with resource fragmentation, limited tool d
 - **Ray-Powered Computation:** Optionally integrate with Ray clusters for distributed computing tasks such as code execution, model training, and deployment.
 
 ### 🤖 Intelligent Agent Ecosystem
-- **Autonomous & Custom Agents:** Deploy pre-built agents or design domain-specific agents that combine LLMs with a rich set of fixed and runtime tools.
-- **Integrated Memory Systems:** Each agent leverages short-term memory for inline operations and a knowledge base (long-term memory) for retrieval via vector searches.
-- **Dynamic Tool Attachment:** Agents have a fixed toolkit that can be extended at runtime. When enabled, an agent can use Hypha service search to discover and invoke new tools available on the platform.
-- **Collaborative Task Execution:** Facilitate collaborative workflows where teams of agents (or human–agent teams) execute interdependent tasks.
+- **Pydantic AI Foundation:** Built on top of Pydantic AI's robust agent framework with extended capabilities for distributed computing and service management.
+- **Rich Agent Configuration:** Configure agents with name, role, goal, backstory, and reasoning strategies for sophisticated behavior.
+- **Advanced Reasoning Strategies:** Support for multiple reasoning approaches including ReAct, Chain of Thought (CoT), Tree of Thoughts (ToT), and Self-Reflection (SR).
+- **Concurrent Safety:** Built-in protection against race conditions during parallel agent execution through agent forking.
+- **Message History:** Integrated message tracking for maintaining conversation context and tool interactions.
+- **Streaming Support:** Native support for streaming responses during agent execution and reasoning.
+
+### 🧠 Reasoning Capabilities
+- **Multiple Strategy Types:** Choose from ReAct, Chain of Thought, Tree of Thoughts, and Self-Reflection strategies.
+- **Strategy Composition:** Combine multiple strategies for complex reasoning tasks.
+- **Configurable Parameters:** Fine-tune strategy behavior with parameters like max steps, confidence thresholds, and temperature.
+- **Streaming Execution:** Stream intermediate thoughts, actions, and observations during reasoning.
+
+### 🛠️ Tool Integration
+- **Runtime Tool Attachment:** Dynamically add tools during agent execution.
+- **Schema-Based Tools:** Define tools using Pydantic schemas for type safety and validation.
+- **Tool Discovery:** Automatic tool metadata extraction for service registration.
+- **Concurrent Tool Execution:** Execute multiple tools in parallel when possible.
 
 ### 🧠 Knowledge & Resource Integration
 - **Unified Knowledge Base:** Combine datasets, documents, and AI models into a single, searchable repository.
@@ -55,25 +69,127 @@ Monolithic agent frameworks struggle with resource fragmentation, limited tool d
 
 ## Architecture Overview
 
+Schema Agents is built on a modular architecture that combines Pydantic AI's agent framework with Hypha's distributed service capabilities:
+
 ```mermaid
 graph TD
-    A[User Interface] --> B[Schema Agents Platform]
-    B --> C{Hypha Services}
-    C --> D[AI Models (LLMs)]
-    C --> E[Datasets & Docs]
-    C --> F[Tools]
-    C --> G[Models]
-    B --> H[Knowledge Base]
-    H --> I[Vector Search]
-    H --> J[Artifact Manager]
+    A[Client Interface] --> B[Schema Agent]
+    B --> C[Pydantic AI Core]
+    B --> D[Hypha Service Layer]
+    
+    C --> E[Model Integration]
+    C --> F[Tool System]
+    C --> G[Reasoning Engine]
+    
+    D --> H[Service Registry]
+    D --> I[Vector Store]
+    D --> J[Message History]
+    
+    E --> K[LLM Providers]
+    F --> L[Schema Tools]
+    G --> M[Reasoning Strategies]
 ```
 
-The platform is architected to support dynamic discovery and orchestration of services across distributed workspaces. Its core modules include:
+### Core Components
 
-- **Service Registry:** Manages registration and discovery of distributed Hypha services.
-- **Agent Core:** Hosts LLMs enhanced with short-term memory, robust tool integration, and a long-term knowledge base.
-- **Resource Management:** Combines artifact management and vector search to support knowledge federation.
-- **User Interfaces:** Provides web-based tools for interactive orchestration, human feedback, and in-browser code execution.
+1. **Agent Core**
+   - Built on Pydantic AI's agent system
+   - Manages model interaction and tool execution
+   - Handles message history and state management
+   - Supports concurrent execution through agent forking
+
+2. **Reasoning Engine**
+   - Implements multiple reasoning strategies (ReAct, CoT, ToT, SR)
+   - Manages thought process and action execution
+   - Supports streaming of intermediate steps
+   - Configurable parameters for fine-tuning
+
+3. **Tool System**
+   - Schema-based tool definition using Pydantic
+   - Runtime tool attachment capability
+   - Concurrent tool execution support
+   - Automatic tool metadata extraction
+
+4. **Service Layer**
+   - Hypha service registration and discovery
+   - Distributed service communication
+   - Vector-based service search
+   - Message history persistence
+
+### Key Abstractions
+
+1. **Agent**
+   ```python
+   class Agent(PydanticAgent[AgentDepsT, ResultDataT]):
+       """Schema Agents Platform Agent implementation."""
+       def __init__(
+           self,
+           model: Model | KnownModelName | None = None,
+           name: str | None = None,
+           role: str | None = None,
+           goal: str | None = None,
+           backstory: str | None = None,
+           reasoning_strategy: ReasoningStrategy | None = None,
+           ...
+       )
+   ```
+
+2. **Reasoning Strategy**
+   ```python
+   class ReasoningStrategy(BaseModel):
+       """Container for reasoning strategy configuration."""
+       type: Union[str, List[str]]  # Strategy type(s)
+       react_config: Optional[ReActConfig] = None
+       cot_config: Optional[CoTConfig] = None
+       tot_config: Optional[ToTConfig] = None
+       sr_config: Optional[SRConfig] = None
+       temperature: float = 0.7
+       max_tokens: Optional[int] = 2000
+   ```
+
+3. **Schema Tool**
+   ```python
+   @agent.schema_tool
+   async def tool_function(
+       param: Type = Field(..., description="Parameter description")
+   ) -> ReturnType:
+       """Tool documentation"""
+       # Implementation
+   ```
+
+### Data Flow
+
+1. **Request Processing**
+   - Client sends request to agent
+   - Agent initializes reasoning strategy if configured
+   - Tools are prepared and validated
+
+2. **Execution**
+   - Model generates thoughts/actions based on strategy
+   - Tools are executed concurrently when possible
+   - Results are streamed if streaming is enabled
+
+3. **Response Handling**
+   - Results are validated against expected types
+   - Message history is updated
+   - Response is returned to client
+
+4. **Service Integration**
+   - Agent can be registered as a Hypha service
+   - Service metadata includes tools and configuration
+   - Other services can discover and use the agent
+
+### Security & Concurrency
+
+1. **Concurrency Safety**
+   - Agent forking for parallel execution
+   - Deep copying of mutable state
+   - Thread-safe message history
+
+2. **Security Features**
+   - Model API key management
+   - Service visibility control
+   - Tool execution validation
 
 ---
 
@@ -94,77 +210,135 @@ The platform is architected to support dynamic discovery and orchestration of se
 
 ### Installation
 
-Install Schema Agents and Hypha RPC dependencies with:
+Install Schema Agents and its dependencies:
 
 ```bash
-pip install schema-agents hypha-rpc
+pip install schema-agents pydantic-ai hypha-rpc
 ```
 
-### Launching an Agent
+### Basic Usage
 
-Below is an example of creating a simple research assistant agent and registering it as a Hypha service:
+Here's a simple example of creating and using an agent:
 
 ```python
-from schema_agents import Agent
+from schema_agents import Agent, schema_tool
+from pydantic import Field
+
+# Create a basic agent
+agent = Agent(
+    model="openai:gpt-4",
+    name="Helper",
+    role="General Assistant",
+    goal="Help users with their tasks",
+    backstory="You are a helpful AI assistant."
+)
+
+# Define a tool using schema_tool decorator
+@agent.schema_tool
+async def calculate(
+    x: float = Field(..., description="First number"),
+    y: float = Field(..., description="Second number"),
+    operation: str = Field(default="add", description="Operation to perform")
+) -> float:
+    """Perform basic arithmetic operations"""
+    if operation == "add":
+        return x + y
+    elif operation == "multiply":
+        return x * y
+    raise ValueError(f"Unknown operation: {operation}")
+
+# Run the agent
+result = await agent.run("Calculate 5 + 3")
+print(result.data)  # Outputs: 8
+
+# Run with streaming
+async with agent.run_stream("What is 5 * 3?") as stream:
+    async for chunk in stream:
+        print(chunk)  # Outputs intermediate steps and final result
+```
+
+### Registering as a Hypha Service
+
+Turn your agent into a distributed service:
+
+```python
 from hypha_rpc import connect_to_server
 
-async def search_papers(query):
-    # Implementation for querying scientific papers
-    return f"Searching papers with query: {query}"
+# Connect to Hypha server
+server = await connect_to_server({"server_url": "http://localhost:9527"})
 
-async def analyze_data(data):
-    # Dummy function for data analysis
-    return f"Analysis results for: {data}"
+# Register the agent
+service = await agent.register(server, service_id="math-helper")
 
-async def start_agent():
-    # Connect to Hypha server
-    server = await connect_to_server({"server_url": "http://localhost:9527"})
-    
-    # Create the research assistant agent
-    research_assistant = Agent(
-        name="Research Bot",
-        instructions="Assist with scientific research tasks, including literature search and data analysis.",
-        tools=[search_papers, analyze_data]
+# Use the service from another client
+client = await connect_to_server({"server_url": "http://localhost:9527"})
+math_service = await client.get_service("math-helper")
+result = await math_service.run("Calculate 10 * 5")
+```
+
+### Using Reasoning Strategies
+
+Configure advanced reasoning capabilities:
+
+```python
+from schema_agents import ReasoningStrategy, ReActConfig
+
+# Create an agent with ReAct reasoning
+agent = Agent(
+    model="openai:gpt-4",
+    name="Analyst",
+    role="Data Analyst",
+    goal="Analyze data and provide insights",
+    reasoning_strategy=ReasoningStrategy(
+        type="react",
+        react_config=ReActConfig(
+            max_loops=5,
+            min_confidence=0.8
+        ),
+        temperature=0.7
     )
+)
 
-    # Register the agent as a Hypha service
-    await research_assistant.register(server, service_id="research-assistant")
-
-if __name__ == "__main__":
-    import asyncio
-    asyncio.run(start_agent())
+# The agent will use ReAct reasoning for complex tasks
+result = await agent.run("Analyze this dataset and explain your thought process")
 ```
-### Using the Agent Service
 
-Once the agent is registered, you can use it from any client that can connect to the Hypha server:
+### Runtime Tool Attachment
+
+Add tools dynamically during execution:
 
 ```python
-from hypha_rpc import connect_to_server
+async def fetch_data(url: str) -> dict:
+    """Fetch data from a URL"""
+    # Implementation
+    return {"data": "example"}
 
-async def use_agent():
-    # Connect to Hypha server
-    server = await connect_to_server({"server_url": "http://localhost:9527"})
-    
-    # Get the research assistant service
-    # Note: Replace with actual service ID from registration
-    svc = await server.get_service("research-assistant")
-    
-    # Use the agent
-    result = await svc.run("Find recent papers about machine learning and analyze their methodology")
-    print(result)
+async def process_data(data: dict) -> str:
+    """Process the fetched data"""
+    # Implementation
+    return "processed result"
 
-if __name__ == "__main__":
-    import asyncio
-    asyncio.run(use_agent())
+# Run agent with runtime tools
+result = await agent.run(
+    "Fetch and process data from example.com",
+    tools=[fetch_data, process_data]
+)
 ```
 
-You can also use the agent service via HTTP requests:
+### Streaming Support
 
-```bash
-# Make sure to replace the workspace and service ID with actual values
-curl -X POST "http://localhost:9527/workspace/services/research-assistant/run" \
-     -H "Content-Type: application/json" \
-     -d '{"message": "Find recent papers about machine learning"}'
+Handle streaming responses:
+
+```python
+async with agent.run_stream(
+    "Explain quantum computing step by step",
+    result_type=str
+) as stream:
+    async for chunk in stream._stream_response:
+        if isinstance(chunk, ModelResponse):
+            for part in chunk.parts:
+                if isinstance(part, TextPart):
+                    print(part.content)
 ```
 
 ---
