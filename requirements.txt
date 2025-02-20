@@ -1,5 +1,5 @@
 numpy
-openai==1.55.3
+openai==1.63.2
 pydantic==2.10.2
 openapi-pydantic==0.4.0
 makefun==1.15.2
@@ -13,5 +13,5 @@ loguru==0.7.2
 # tenacity==8.2.3
 # langchain==0.0.314
 # pykernel==0.1.6
-pydantic-ai>=0.1.0
+pydantic-ai>=0.0.24
 hypha-rpc>=0.20.47
