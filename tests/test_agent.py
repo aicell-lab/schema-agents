@@ -16,6 +16,7 @@ from schema_agents.agent import Agent
 from schema_agents.reasoning import ReasoningStrategy, ReActConfig
 from hypha_rpc import connect_to_server
 from .conftest import TestOpenAIModel
+from .test_utils import TestDependencies
 
 # Load environment variables
 load_dotenv()
@@ -25,11 +26,10 @@ models.ALLOW_MODEL_REQUESTS = True
 
 # Test Models and Dependencies
 class AnalysisResult(BaseModel):
-    """Structured output for analysis results."""
-    message: str = Field(..., description="Analysis message")
-    confidence: float = Field(..., description="Confidence score between 0 and 1")
-    tags: List[str] = Field(default_factory=list, description="Analysis tags")
-    metadata: Optional[Dict] = Field(None, description="Additional metadata")
+    """Test result type with structured output"""
+    message: str
+    confidence: float
+    tags: List[str]
 
 class ReasoningConfig(BaseModel):
     """Configuration for agent reasoning strategies"""
@@ -37,30 +37,6 @@ class ReasoningConfig(BaseModel):
     max_steps: int = Field(3, description="Maximum reasoning steps")
     min_confidence: float = Field(0.8, description="Minimum confidence threshold")
     reflection_rounds: Optional[int] = Field(None, description="Number of reflection rounds")
-
-class TestDependencies(BaseModel):
-    """Test dependencies for agent"""
-    history: List[str] = Field(default_factory=list)
-    context: Dict[str, str] = Field(default_factory=dict)
-    vector_store: Optional[Dict] = Field(default_factory=dict)
-    tool_calls: Dict[str, int] = Field(default_factory=dict)
-    
-    async def add_to_history(self, entry: str):
-        self.history.append(entry)
-    
-    async def get_context(self, key: str) -> Optional[str]:
-        return self.context.get(key)
-    
-    async def store_vector(self, key: str, vector: List[float]):
-        self.vector_store[key] = vector
-    
-    async def search_vectors(self, query_vector: List[float], top_k: int = 3) -> List[str]:
-        # Simulate vector search
-        return list(self.vector_store.keys())[:top_k]
-    
-    def record_tool_call(self, tool_name: str):
-        """Record a tool call."""
-        self.tool_calls[tool_name] = self.tool_calls.get(tool_name, 0) + 1
 
 # Fixtures
 @pytest.fixture

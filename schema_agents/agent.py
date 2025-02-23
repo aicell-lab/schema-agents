@@ -4,7 +4,13 @@ import asyncio
 import copy
 from contextlib import asynccontextmanager
 from typing import Any, Dict, List, Type, TypeVar, Union, AsyncIterator
+from inspect import Parameter, signature
+from pydantic.fields import FieldInfo
+from typing import get_args, get_origin, Union
+import inspect
+import functools
 
+from pydantic_ai.tools import ToolDefinition
 from pydantic import BaseModel, ValidationError, Field
 from pydantic_ai import Agent as PydanticAgent
 from pydantic_ai import RunContext, models, result, exceptions
@@ -241,13 +247,12 @@ class Agent(PydanticAgent[AgentDepsT, ResultDataT]):
             )
         )
 
-    async def register(self, server, service_id: str | None = None, workspace: str | None = None):
+    async def register(self, server, service_id: str | None = None):
         """Register the agent as a Hypha service.
         
         Args:
             server: The Hypha server instance to register with
             service_id: Optional service ID, defaults to agent name if not provided
-            workspace: Optional workspace to register in
         
         Returns:
             The registered service object
@@ -322,12 +327,13 @@ class Agent(PydanticAgent[AgentDepsT, ResultDataT]):
             "docs": f"Name: {self.name}\nRole: {self.role}\nGoal: {self.goal}\nBackstory: {self.backstory}",
             "config": {
                 "visibility": "public",
-                "require_context": True
+                "require_context": True,
+                "run_in_executor": True  # Add this to ensure proper execution
             },
             "role": self.role,
             "goal": self.goal,
             "backstory": self.backstory,
-            "reasoning_strategy": self.reasoning_strategy.model_dump() if self.reasoning_strategy else None,
+            "reasoning_strategy": self.reasoning_strategy.model_dump(mode="json") if self.reasoning_strategy else None,
             "result_type": self.result_type.__name__ if self.result_type else None,
             "tools": tools_meta,
             "model": str(self._model) if self._model else None,
@@ -387,13 +393,6 @@ class Agent(PydanticAgent[AgentDepsT, ResultDataT]):
                 '''Perform a calculation'''
                 return f"{x} {operation} {y}"
         """
-        from inspect import Parameter, signature
-        from pydantic.fields import FieldInfo
-        from typing import get_args, get_origin, Union
-        import inspect
-        import functools
-        from pydantic_ai.tools import ToolDefinition
-
         async def prepare_tool(ctx: RunContext[AgentDepsT], tool_name: str) -> Dict[str, Any]:
             """Extract Field metadata to create tool schema"""
             sig = signature(func)

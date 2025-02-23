@@ -441,14 +441,14 @@ async def main():
         print("All agents created successfully")
         
         # Register agents as services
-        print(f"Registering agents in workspace: {deps.workspace}")
-        await preprocessor.register(server, "preprocessor", deps.workspace)
+        print(f"Registering agents")
+        await preprocessor.register(server, "preprocessor")
         print("Preprocessor agent registered")
-        await analyzer.register(server, "analyzer", deps.workspace)
+        await analyzer.register(server, "analyzer")
         print("Analyzer agent registered")
-        await reporter.register(server, "reporter", deps.workspace)
+        await reporter.register(server, "reporter")
         print("Reporter agent registered")
-        await coordinator.register(server, "coordinator", deps.workspace)
+        await coordinator.register(server, "coordinator")
         print("Coordinator agent registered")
         
         # Start analysis workflow
