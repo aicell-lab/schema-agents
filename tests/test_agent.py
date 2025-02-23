@@ -15,6 +15,7 @@ from pydantic_ai.tools import Tool
 from schema_agents.agent import Agent
 from schema_agents.reasoning import ReasoningStrategy, ReActConfig
 from hypha_rpc import connect_to_server
+from .conftest import TestOpenAIModel
 
 # Load environment variables
 load_dotenv()
@@ -103,9 +104,26 @@ def test_deps():
 
 # Test Cases
 @pytest.mark.asyncio
-async def test_agent_basic_interaction(test_agent, test_deps):
+async def test_agent_basic_interaction(mock_openai_server, test_deps):
     """Test basic agent interaction with string output"""
-    result = await test_agent.run(
+    # Create a model using the mock server
+    model = TestOpenAIModel(
+        base_url=mock_openai_server,
+        api_key="test-key",
+        model_name="test-chat-model"
+    )
+    
+    agent = Agent(
+        model=model,
+        name="Test Agent",
+        deps_type=TestDependencies,
+        result_type=str,
+        role="Test Assistant",
+        goal="Help with testing the agent implementation",
+        backstory="You are an AI assistant helping with testing."
+    )
+    
+    result = await agent.run(
         "Hello, how are you?",
         deps=test_deps
     )
@@ -113,9 +131,26 @@ async def test_agent_basic_interaction(test_agent, test_deps):
     assert len(result.data) > 0
 
 @pytest.mark.asyncio
-async def test_agent_structured_output(structured_agent, test_deps):
+async def test_agent_structured_output(mock_openai_server, test_deps):
     """Test agent with structured output"""
-    result = await structured_agent.run(
+    # Create a model using the mock server
+    model = TestOpenAIModel(
+        base_url=mock_openai_server,
+        api_key="test-key",
+        model_name="test-chat-model"
+    )
+    
+    agent = Agent(
+        model=model,
+        name="Structured Agent",
+        deps_type=TestDependencies,
+        result_type=AnalysisResult,
+        role="Analysis Assistant",
+        goal="Provide structured analysis results",
+        backstory="You are an AI assistant that provides structured analysis."
+    )
+    
+    result = await agent.run(
         "Analyze this test message",
         deps=test_deps
     )
@@ -130,44 +165,61 @@ async def test_agent_with_tools():
     class ToolDeps:
         counter: int = 0
         memory: Dict[str, str] = None
-        
+
         def __init__(self):
             self.counter = 0
             self.memory = {}
-    
+
     agent = Agent(
         model=OpenAIModel('gpt-4o-mini', api_key=os.getenv('OPENAI_API_KEY')),
         name="Tool Agent",
         deps_type=ToolDeps,
         result_type=str
     )
-    
+
     @agent.tool
     async def increment_counter(ctx: RunContext[ToolDeps]) -> str:
         """Increment the counter"""
         ctx.deps.counter += 1
         return f"Counter is now {ctx.deps.counter}"
-    
+
     @agent.tool
     async def store_memory(ctx: RunContext[ToolDeps], key: str, value: str) -> str:
         """Store a value in memory"""
         ctx.deps.memory[key] = value
         return f"Stored {value} under key {key}"
-    
+
     deps = ToolDeps()
     result = await agent.run(
         "Please increment the counter and store the number 42 with key 'answer'",
         deps=deps
     )
-    
+
     assert deps.counter == 1
     assert deps.memory.get('answer') == '42'
     assert isinstance(result.data, str)
 
 @pytest.mark.asyncio
-async def test_agent_streaming(test_agent, test_deps):
+async def test_agent_streaming(mock_openai_server, test_deps):
     """Test agent streaming capability"""
-    async with test_agent.run_stream(
+    # Create a model using the mock server
+    model = TestOpenAIModel(
+        base_url=mock_openai_server,
+        api_key="test-key",
+        model_name="test-chat-model"
+    )
+    
+    agent = Agent(
+        model=model,
+        name="Test Agent",
+        deps_type=TestDependencies,
+        result_type=str,
+        role="Test Assistant",
+        goal="Help with testing the agent implementation",
+        backstory="You are an AI assistant helping with testing."
+    )
+    
+    async with agent.run_stream(
         "Give me a long response",
         deps=test_deps
     ) as response:
@@ -180,17 +232,34 @@ async def test_agent_streaming(test_agent, test_deps):
         assert isinstance(final_result, str)
 
 @pytest.mark.asyncio
-async def test_agent_memory_persistence(test_agent, test_deps):
+async def test_agent_memory_persistence(mock_openai_server, test_deps):
     """Test agent memory/history persistence"""
+    # Create a model using the mock server
+    model = TestOpenAIModel(
+        base_url=mock_openai_server,
+        api_key="test-key",
+        model_name="test-chat-model"
+    )
+    
+    agent = Agent(
+        model=model,
+        name="Test Agent",
+        deps_type=TestDependencies,
+        result_type=str,
+        role="Test Assistant",
+        goal="Help with testing the agent implementation",
+        backstory="You are an AI assistant helping with testing."
+    )
+    
     # First interaction
-    await test_agent.run(
+    await agent.run(
         "Remember the number 42",
         deps=test_deps
     )
     assert len(test_deps.history) > 0
     
     # Second interaction referencing first
-    result = await test_agent.run(
+    result = await agent.run(
         "What number did I ask you to remember?",
         deps=test_deps
     )
@@ -205,13 +274,13 @@ async def test_agent_with_vector_memory(openai_model):
         deps_type=TestDependencies,
         result_type=str
     )
-    
+
     deps = TestDependencies()
-    
+
     # Store some test vectors
     await deps.store_vector("doc1", [0.1, 0.2, 0.3])
     await deps.store_vector("doc2", [0.4, 0.5, 0.6])
-    
+
     @agent.tool
     async def search_knowledge_base(
         ctx: RunContext[TestDependencies],
@@ -220,7 +289,7 @@ async def test_agent_with_vector_memory(openai_model):
     ) -> List[str]:
         """Search the vector store for similar documents"""
         return await ctx.deps.search_vectors(query_vector, top_k)
-    
+
     result = await agent.run(
         "Search for similar documents",
         deps=deps
@@ -260,7 +329,7 @@ async def test_agent_with_schema_tools():
         def __init__(self):
             self._model_name = "mock-model"
             self._has_tool_return = False
-        
+    
         @property
         def model_name(self) -> str:
             return self._model_name
@@ -385,7 +454,7 @@ async def test_agent_with_schema_tools():
         usage_limits=None  # Disable usage limits for testing
     )
     assert result1.data == "Hello Bob!"
-
+    
     # Test calculation with custom parameters
     agent2 = Agent(
         model=CalculateMockModel(),
@@ -426,7 +495,7 @@ async def test_agent_with_schema_tools():
         usage_limits=None  # Disable usage limits for testing
     )
     assert result2.data == "5 + 3 = 8"
-
+    
 @pytest.mark.asyncio
 async def test_agent_error_handling():
     """Test various error handling scenarios"""
@@ -498,7 +567,7 @@ async def test_agent_error_handling():
             "This should raise an error",
             deps=TestDependencies(),
             usage_limits=None  # Disable usage limits for testing
-        )
+    )
 
 @pytest.mark.asyncio
 async def test_agent_override(openai_model):
@@ -521,7 +590,7 @@ async def test_agent_override(openai_model):
     result1 = await agent.run(
         "Hello",
         deps=TestDependencies()
-    )
+        )
     
     # Test with overridden model
     result2 = await agent.run(
@@ -534,12 +603,19 @@ async def test_agent_override(openai_model):
     assert isinstance(result2.data, str)
 
 @pytest.mark.asyncio
-async def test_agent_with_real_openai_reasoning(openai_model):
-    """Test reasoning strategy with real OpenAI model."""
+async def test_agent_with_reasoning(mock_openai_server):
+    """Test reasoning strategy with mock OpenAI server."""
+    # Create a model using the mock server
+    model = TestOpenAIModel(
+        base_url=mock_openai_server,
+        api_key="test-key",
+        model_name="test-chat-model"
+    )
+    
     # Create agent with ReAct reasoning
     agent = Agent(
-        model=openai_model,
-        name="Real OpenAI ReAct Agent",
+        model=model,
+        name="Mock OpenAI ReAct Agent",
         deps_type=TestDependencies,
         result_type=str,
         role="Problem Solver",
@@ -547,7 +623,7 @@ async def test_agent_with_real_openai_reasoning(openai_model):
         reasoning_strategy=ReasoningStrategy(
             type="react",
             react_config=ReActConfig(
-                max_loops=10,
+                max_loops=3,  # Reduce max loops since we know it should take 2 steps
                 min_confidence=0.8
             )
         )
