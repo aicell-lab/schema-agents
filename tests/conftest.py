@@ -7,22 +7,18 @@ import uuid
 import pytest
 import pytest_asyncio
 import requests
-from requests import RequestException
 from pydantic_ai.models.openai import OpenAIModel
-from hypha_rpc import connect_to_server
 import asyncio
 from fastapi import FastAPI, Request, HTTPException
 from hypha_rpc.utils.serve import create_openai_chat_server
 import uvicorn
-import threading
-import random
 import json
 import httpx
 import socket
 from fastapi.responses import StreamingResponse
 
 # Test server configuration
-WS_PORT = 9527
+WS_PORT = 9573
 OPENAI_PORT = 9528
 JWT_SECRET = str(uuid.uuid4())
 os.environ["JWT_SECRET"] = JWT_SECRET
@@ -470,9 +466,8 @@ def openai_model():
         'gpt-4o-mini',
         api_key=os.getenv('OPENAI_API_KEY')
     )
-
-@pytest_asyncio.fixture(scope="session")
-async def hypha_server_process():
+@pytest.fixture(scope="session")
+def hypha_server_url():
     """Start and manage the Hypha server process."""
     # Start server process
     proc = subprocess.Popen(
@@ -490,15 +485,8 @@ async def hypha_server_process():
             response = requests.get(f"http://127.0.0.1:{WS_PORT}/health/liveness")
             if response.ok:
                 break
-        except RequestException:
-            # Check if process is still running
-            if proc.poll() is not None:
-                stdout, stderr = proc.communicate()
-                raise RuntimeError(
-                    f"Server process exited with code {proc.returncode}.\n"
-                    f"stdout: {stdout.decode()}\n"
-                    f"stderr: {stderr.decode()}"
-                )
+        except requests.RequestException:
+            pass
         time.sleep(0.5)  # Longer sleep to reduce CPU usage
     else:
         proc.kill()
@@ -510,37 +498,9 @@ async def hypha_server_process():
             f"stderr: {stderr.decode()}"
         )
     
-    yield proc
+    yield f"http://127.0.0.1:{WS_PORT}"
     
     # Cleanup
     proc.kill()
     proc.terminate()
     proc.wait(timeout=5)  # Wait for process to terminate
-
-@pytest_asyncio.fixture
-async def hypha_server(hypha_server_process):
-    """Fixture that provides a connected Hypha server instance."""
-    # Try to connect multiple times
-    max_retries = 3
-    retry_delay = 1
-    last_error = None
-    
-    for i in range(max_retries):
-        try:
-            server = await connect_to_server({"server_url": f"ws://127.0.0.1:{WS_PORT}/ws"})
-            try:
-                yield server
-            finally:
-                await server.disconnect()
-            return
-        except Exception as e:
-            last_error = e
-            if i < max_retries - 1:
-                await asyncio.sleep(retry_delay)
-    
-    raise RuntimeError(f"Failed to connect to server after {max_retries} attempts: {last_error}")
-
-@pytest.fixture
-def hypha_server_url():
-    """Get the Hypha server URL."""
-    return f"http://localhost:{WS_PORT}"
