@@ -18,6 +18,7 @@ from pydantic_ai.tools import ToolPrepareFunc, AgentDepsT, Tool, ToolFuncEither,
 from pydantic.fields import PydanticUndefined
 from pydantic_ai.messages import ModelResponse, TextPart
 from schema_agents.reasoning import ReasoningStrategy
+from schema_agents.reasoning import execute_react_reasoning
 
 ResultDataT = TypeVar('ResultDataT')
 RunResultDataT = TypeVar('RunResultDataT')
@@ -159,7 +160,7 @@ class Agent(PydanticAgent[AgentDepsT, ResultDataT]):
                     if strategy_type == "react":
                         if not strategy.react_config:
                             raise ValueError("ReAct strategy selected but no react_config provided")
-                        from schema_agents.reasoning import execute_react_reasoning
+                        
                         final_answer = await execute_react_reasoning(
                             user_prompt,
                             model_used,
@@ -558,7 +559,6 @@ class Agent(PydanticAgent[AgentDepsT, ResultDataT]):
                     if strategy_type == "react":
                         if not strategy.react_config:
                             raise ValueError("ReAct strategy selected but no react_config provided")
-                        from schema_agents.reasoning import execute_react_reasoning
                         
                         # Create a StreamedRunResult for the ReAct reasoning
                         streamed_result = result.StreamedRunResult(

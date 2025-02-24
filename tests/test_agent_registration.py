@@ -83,10 +83,10 @@ async def test_agent_registration(test_agent, test_deps, hypha_server_url):
         assert isinstance(result, str)
 
 @pytest.mark.asyncio
-async def test_agent_registration_with_tools(openai_model):
+async def test_agent_registration_with_tools(openai_model, hypha_server_url):
     """Test registering an agent with tools as a Hypha service."""
     async with connect_to_server({
-        "server_url": "https://hypha.aicell.io"
+        "server_url": hypha_server_url
     }) as server:
         # Create agent with tools
         agent = Agent(
@@ -122,10 +122,10 @@ async def test_agent_registration_with_tools(openai_model):
         assert "8" in result.lower()
 
 @pytest.mark.asyncio
-async def test_agent_registration_with_structured_output(structured_agent):
+async def test_agent_registration_with_structured_output(structured_agent, hypha_server_url):
     """Test registering an agent with structured output as a Hypha service."""
     async with connect_to_server({
-        "server_url": "https://hypha.aicell.io"
+        "server_url": hypha_server_url
     }) as server:
         # Register agent
         service_info = await structured_agent.register(server, "structured-agent")
@@ -142,10 +142,10 @@ async def test_agent_registration_with_structured_output(structured_agent):
         assert 0 <= result_obj.confidence <= 1
 
 @pytest.mark.asyncio
-async def test_agent_registration_with_reasoning(openai_model):
+async def test_agent_registration_with_reasoning(openai_model, hypha_server_url):
     """Test registering an agent with reasoning strategy as a Hypha service."""
     async with connect_to_server({
-        "server_url": "https://hypha.aicell.io"
+        "server_url": hypha_server_url
     }) as server:
         # Create agent with reasoning strategy
         agent = Agent(
@@ -178,13 +178,13 @@ async def test_agent_registration_with_reasoning(openai_model):
         assert "4" in result.lower()
 
 @pytest.mark.asyncio
-async def test_agent_registration_client_usage(test_agent):
+async def test_agent_registration_client_usage(test_agent, hypha_server_url):
     """Test using a registered agent from a different client."""
     # Reset callback state
     reset_callback_state()
     
     async with connect_to_server({
-        "server_url": "https://hypha.aicell.io"
+        "server_url": hypha_server_url
     }) as server:
         # Register agent
         service_id = "client-test-agent"
@@ -194,7 +194,7 @@ async def test_agent_registration_client_usage(test_agent):
         assert service.id.endswith(":client-test-agent")
 
         # Connect as a different client
-        client = await connect_to_server({"server_url": "https://hypha.aicell.io"})
+        client = await connect_to_server({"server_url": hypha_server_url})
         try:
             # Get service
             service = await client.get_service(service.id)  # Use the full service ID
