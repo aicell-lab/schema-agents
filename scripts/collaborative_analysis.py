@@ -55,6 +55,7 @@ for handler in logging.getLogger().handlers:
 from dotenv import load_dotenv
 load_dotenv()
 
+
 # Ensure OPENAI_API_KEY is set
 if not os.getenv('OPENAI_API_KEY'):
     raise ValueError("OPENAI_API_KEY environment variable is not set")
@@ -422,7 +423,7 @@ async def main():
         # Create OpenAI model instance
         print("Creating OpenAI model instance...")
         model = OpenAIModel(
-            'gpt-4',
+            'gpt-4o-mini',
             api_key=os.getenv('OPENAI_API_KEY')
         )
         print("OpenAI model instance created")

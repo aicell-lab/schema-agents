@@ -13,14 +13,6 @@ dependencies = [
     "loguru",
     "openapi-pydantic",
     "makefun>=1.15.2",
-    # "jsonschema>=4.0.1",
-    # "shortuuid>=1.0.1",
-    # "jhub-client",
-    # "aiohttp-sse-client",
-    # "jupyter-client",
-    # "faiss-cpu",
-    # "tiktoken>=0.7.0",
-    # "tenacity",
     "pydantic-ai>=0.0.24",
     "hypha-rpc>=0.20.47"
 ]
