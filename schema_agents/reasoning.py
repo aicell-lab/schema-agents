@@ -4,7 +4,7 @@ import asyncio
 import dataclasses
 from typing import Any, Dict, List, Literal, Optional, Union, AsyncIterator
 from pydantic import BaseModel, Field
-from pydantic_graph import BaseNode, Graph, GraphRunContext
+from pydantic_graph import BaseNode, Graph, GraphRunContext, GraphRun
 from pydantic_graph.nodes import End
 
 from pydantic_ai import RunContext, models, result, exceptions
@@ -300,6 +300,7 @@ class FinalAnswerNode(BaseNode[ReasoningState, ReasoningDeps, str]):
 
 def build_react_graph() -> Graph[ReasoningState, ReasoningDeps, str]:
     """Build the ReAct reasoning graph."""
+    # Ensure ThoughtNode is first in the nodes tuple to be used as the default starting node
     nodes = (ThoughtNode, ActionNode, ObservationNode, FinalAnswerNode)
     return Graph[ReasoningState, ReasoningDeps, str](
         nodes=nodes,
@@ -343,14 +344,11 @@ async def execute_react_reasoning_sync(
         model_settings=None
     )
     
-    # Build and run graph
+    # Build and run the graph
     graph = build_react_graph()
-    result, history = await graph.run(
-        ThoughtNode(),
-        state=state,
-        deps=deps
-    )
-    return result
+    ctx = GraphRunContext(state=state, deps=deps)
+    graph_result = await graph.run(ThoughtNode(), state=state, deps=deps)
+    return graph_result
 
 async def execute_react_reasoning_stream(
     prompt: str,
@@ -371,10 +369,10 @@ async def execute_react_reasoning_stream(
         last_observation=None,
         final_answer=None
     )
-    
+
     # Convert tools list to function_tools dict
     function_tools = {tool.name: tool for tool in tools}
-    
+
     deps = ReasoningDeps(
         user_deps=run_context.deps,
         prompt=prompt,
@@ -386,56 +384,18 @@ async def execute_react_reasoning_stream(
         usage_limits=UsageLimits(),
         model_settings=None
     )
-    
+
     # For streaming, we need to handle the graph execution step by step
-    node = ThoughtNode()
-    history = []
-    
-    while True:
-        if isinstance(node, ThoughtNode):
-            # Process thoughts and determine next action
-            next_node = await node.run(GraphRunContext(state, deps))
-            history.append(next_node)
-            node = next_node
-            # Get the last response from message history
-            if state.message_history and isinstance(state.message_history[-1], ModelResponse):
-                response = state.message_history[-1]
-                if response.parts and isinstance(response.parts[0], TextPart):
-                    yield f"Thought: {response.parts[0].content}"
-        
-        elif isinstance(node, ActionNode):
-            # Execute actions and get observations
-            next_node = await node.run(GraphRunContext(state, deps))
-            history.append(next_node)
-            node = next_node
-            # Get the last response from message history
-            if state.message_history and isinstance(state.message_history[-1], ModelResponse):
-                response = state.message_history[-1]
-                if response.parts and isinstance(response.parts[0], TextPart):
-                    yield f"Action: {response.parts[0].content}"
-        
-        elif isinstance(node, ObservationNode):
-            # Process observations
-            next_node = await node.run(GraphRunContext(state, deps))
-            history.append(next_node)
-            node = next_node
-            # Get the last observation
-            if state.last_observation:
-                yield f"Observation: {state.last_observation}"
-        
-        elif isinstance(node, FinalAnswerNode):
-            # Process Final Response
-            result = await node.run(GraphRunContext(state, deps))
-            yield str(result.data)
-            break
-        
-        elif isinstance(node, End):
-            # End of reasoning
-            yield str(node.data)
-            break
-        
-        else:
-            raise ValueError(f"Unknown node type: {type(node)}")
+    graph = build_react_graph()
+    graph_run = await graph.run(ThoughtNode(), state=state, deps=deps)
+    async for node_result in graph_run:
+        # For ThoughtNode, yield the last message from history
+        if isinstance(node_result, ThoughtNode):
+            if state.message_history:
+                yield state.message_history[-1]
+        # For FinalAnswerNode, yield the final answer
+        elif isinstance(node_result, FinalAnswerNode):
+            yield state.final_answer
 
 async def execute_react_reasoning(
     prompt: str,
@@ -446,10 +406,62 @@ async def execute_react_reasoning(
     stream: bool = False
 ) -> Union[str, AsyncIterator[str]]:
     """Execute ReAct reasoning strategy."""
+    # Initialize state
+    state = ReasoningState(
+        message_history=[],
+        usage=run_context.usage,
+        retries=0,
+        run_step=run_context.run_step,
+        loop_count=0,
+        confidence=0.0
+    )
+    
+    # Initialize dependencies
+    function_tools = {tool.name: tool for tool in tools}
+    deps = ReasoningDeps(
+        user_deps=run_context.deps,
+        prompt=prompt,
+        model=model,
+        tools=tools,
+        strategy=strategy,
+        run_context=run_context,
+        function_tools=function_tools,
+        usage_limits=model.usage_limits if hasattr(model, 'usage_limits') else None
+    )
+    
+    # Build and run graph
+    graph = build_react_graph()
+    
     if stream:
-        return execute_react_reasoning_stream(prompt, model, tools, strategy, run_context)
+        # Create an async generator for streaming results
+        async def stream_generator():
+            graph_run = GraphRun(
+                graph=graph,
+                start_node=ThoughtNode(),
+                history=[],
+                state=state,
+                deps=deps,
+                auto_instrument=True
+            )
+            async for node_result in graph_run:
+                if isinstance(node_result, str):
+                    yield node_result
+                elif isinstance(node_result, ThoughtNode):
+                    # For ThoughtNode, yield the last message from history
+                    if state.message_history:
+                        last_msg = state.message_history[-1]
+                        if isinstance(last_msg, ModelResponse):
+                            yield last_msg
+                elif isinstance(node_result, FinalAnswerNode):
+                    # For FinalAnswerNode, yield the final answer
+                    yield node_result.thought
+        
+        # Return the generator directly
+        return stream_generator()
     else:
-        return await execute_react_reasoning_sync(prompt, model, tools, strategy, run_context)
+        # Run synchronously and return final result
+        graph_result = await graph.run(ThoughtNode(), state=state, deps=deps)
+        return graph_result.output
 
 @dataclasses.dataclass
 class StreamThoughtNode(BaseNode[ReasoningState, ReasoningDeps, str]):

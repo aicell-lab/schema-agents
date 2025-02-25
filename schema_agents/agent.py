@@ -17,7 +17,7 @@ from pydantic_ai import RunContext, models, result, exceptions
 from pydantic_ai.tools import ToolPrepareFunc, AgentDepsT, Tool, ToolFuncEither, ToolDefinition
 from pydantic.fields import PydanticUndefined
 from pydantic_ai.messages import ModelResponse, TextPart
-from schema_agents.reasoning import ReasoningStrategy
+from schema_agents.reasoning import ReasoningStrategy, ReasoningDeps
 from schema_agents.reasoning import execute_react_reasoning
 
 ResultDataT = TypeVar('ResultDataT')
@@ -109,7 +109,7 @@ class Agent(PydanticAgent[AgentDepsT, ResultDataT]):
         deps: AgentDepsT = None,
         tools: List[Union[Tool[AgentDepsT], ToolFuncEither[AgentDepsT, Any]]] | None = None,
         **kwargs
-    ) -> result.RunResult[Any]:
+    ) -> result.FinalResult[Any]:
         """Run the agent with optional runtime tools.
         
         This overrides the base run() to support:
@@ -160,7 +160,19 @@ class Agent(PydanticAgent[AgentDepsT, ResultDataT]):
                     if strategy_type == "react":
                         if not strategy.react_config:
                             raise ValueError("ReAct strategy selected but no react_config provided")
-                        
+
+                        # Create reasoning deps with usage limits
+                        reasoning_deps = ReasoningDeps(
+                            user_deps=deps,
+                            prompt=user_prompt,
+                            model=model_used,
+                            tools=list(agent_copy._function_tools.values()),
+                            strategy=strategy,
+                            run_context=run_context,
+                            function_tools=agent_copy._function_tools,
+                            usage_limits=model_used.usage_limits if hasattr(model_used, 'usage_limits') else None
+                        )
+
                         final_answer = await execute_react_reasoning(
                             user_prompt,
                             model_used,
@@ -173,12 +185,9 @@ class Agent(PydanticAgent[AgentDepsT, ResultDataT]):
                         raise ValueError(f"Unknown strategy type: {strategy_type}")
 
                 # Create a RunResult with the final answer
-                run_result = result.RunResult(
-                    message_history or [],
-                    len(message_history) if message_history else 0,
-                    final_answer,
-                    None,  # No tool name for reasoning results
-                    run_context.usage
+                run_result = result.FinalResult(
+                    data=final_answer,
+                    tool_name=None  # No tool name for reasoning results
                 )
             else:
                 # Run with the copied agent without reasoning strategy
@@ -212,7 +221,10 @@ class Agent(PydanticAgent[AgentDepsT, ResultDataT]):
                     await deps.add_to_history(str(run_result.data))
 
             # Update internal message history
-            self._message_history.extend(run_result._all_messages)
+            if hasattr(run_result, 'messages'):
+                self._message_history.extend(run_result.messages)
+            elif hasattr(run_result, 'message_history'):
+                self._message_history.extend(run_result.message_history)
 
             return run_result
         except Exception as e:
@@ -234,7 +246,7 @@ class Agent(PydanticAgent[AgentDepsT, ResultDataT]):
         deps: AgentDepsT = None,
         tools: List[Union[Tool[AgentDepsT], ToolFuncEither[AgentDepsT, Any]]] | None = None,
         **kwargs
-    ) -> result.RunResult[Any]:
+    ) -> result.FinalResult[Any]:
         """Synchronous version of run()"""
         return asyncio.get_event_loop().run_until_complete(
             self.run(
@@ -593,7 +605,7 @@ class Agent(PydanticAgent[AgentDepsT, ResultDataT]):
                                 else:
                                     yield ModelResponse(parts=[TextPart(content=str(chunk))], model_name=model_used.model_name)
                         
-                        # Create a StreamedResponse
+                        # Create a StreamedResponse and assign the generator
                         streamed_result._stream_response = stream_generator()
                         yield streamed_result
                         

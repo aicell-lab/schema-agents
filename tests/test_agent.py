@@ -6,7 +6,7 @@ from dataclasses import dataclass, asdict
 from typing import List, Optional, Dict, Union, Tuple, Any
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
-from pydantic_ai import RunContext, models, exceptions
+from pydantic_ai import RunContext, models, exceptions, usage
 from pydantic_ai.models.openai import OpenAIModel
 from pydantic_ai.messages import ModelMessage, ModelRequest, ModelResponse, TextPart, ToolReturnPart, ToolCallPart
 from pydantic_ai.usage import Usage
@@ -273,27 +273,45 @@ async def test_agent_with_vector_memory(openai_model):
     assert isinstance(result.data, str)
 
 @pytest.mark.asyncio
-async def test_agent_with_dynamic_tools(openai_model):
+async def test_agent_with_dynamic_tools(mock_openai_server):
     """Test agent with dynamically attached tools"""
+
+    # Create a model using the mock server instead of a custom mock model
+    model = TestOpenAIModel(
+        base_url=mock_openai_server,
+        api_key="test-key",
+        model_name="test-chat-model"
+    )
+    
     agent = Agent(
-        model=openai_model,
+        model=model,
         name="Dynamic Tool Agent",
         deps_type=TestDependencies,
-        result_type=str
+        result_type=str,
     )
-    
+
     async def dynamic_tool(x: int) -> int:
         return x * 2
-    
+
     async def another_tool(text: str) -> str:
         return text.upper()
+
+    # Create dependencies
+    deps = TestDependencies()
     
+    # Run the agent with the tools
     result = await agent.run(
         "Process some data",
-        deps=TestDependencies(),
+        deps=deps,
         tools=[dynamic_tool, another_tool]
     )
+
+    # Verify the result
     assert isinstance(result.data, str)
+    # We cannot assert exact content here since the mock server doesn't know about our dynamic tools,
+    # but we can verify the test completes successfully with a string result
+    assert isinstance(result.data, str)
+    assert len(result.data) > 0
 
 @pytest.mark.asyncio
 async def test_agent_with_schema_tools():
@@ -546,27 +564,34 @@ async def test_agent_error_handling():
     )
 
 @pytest.mark.asyncio
-async def test_agent_override(openai_model):
+async def test_agent_override(mock_openai_server):
     """Test agent model override functionality"""
+    # Create a model using the mock server
+    model = TestOpenAIModel(
+        base_url=mock_openai_server,
+        api_key="test-key",
+        model_name="test-chat-model"
+    )
+    
     agent = Agent(
-        model=openai_model,
+        model=model,
         name="Override Agent",
         deps_type=TestDependencies,
         result_type=str
     )
     
-    # Create a new OpenAI model with different settings
-    new_model = OpenAIModel(
-        'gpt-4o-mini',
-        api_key=os.getenv('OPENAI_API_KEY'),
-        system_prompt_role="Test Role"
+    # Create a new model with different settings
+    new_model = TestOpenAIModel(
+        base_url=mock_openai_server,
+        api_key="test-key-2",
+        model_name="test-chat-model-2"
     )
     
     # Test with original model
     result1 = await agent.run(
         "Hello",
         deps=TestDependencies()
-        )
+    )
     
     # Test with overridden model
     result2 = await agent.run(
@@ -680,16 +705,13 @@ async def test_react_reasoning_with_streaming():
         "What is 25 * 48? Then find information about the number in Wikipedia.",
         deps=deps
     ) as response:
-        try:
-            async for chunk in response._stream_response:
-                chunks.append(chunk)
-                if isinstance(chunk, ModelResponse):
-                    final_result = chunk.parts[0].content
-                else:
-                    final_result = chunk
-        except Exception as e:
-            final_result = await response.get_data()
-    
+        async for chunk in response._stream_response:
+            chunks.append(chunk)
+            if isinstance(chunk, ModelResponse):
+                final_result = chunk.parts[0].content
+            else:
+                final_result = chunk
+
     # Verify result
     assert isinstance(final_result, str)
     assert "1200" in final_result
