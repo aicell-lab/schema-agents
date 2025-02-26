@@ -16,10 +16,6 @@ import json
 import httpx
 import socket
 from fastapi.responses import StreamingResponse
-from dataclasses import dataclass
-from typing import List, Dict, Any, Optional
-from pydantic import BaseModel
-from pydantic_ai import RunContext, models, result
 
 # Test server configuration
 WS_PORT = 9573
@@ -449,38 +445,19 @@ async def mock_openai_server():
             pass
 
 class TestOpenAIModel(OpenAIModel):
-    """Test OpenAI model implementation."""
+    """Custom OpenAI model that uses a mock server."""
+    def __init__(self, base_url: str, **kwargs):
+        super().__init__(**kwargs)
+        self._base_url = base_url
+        # Configure the client to use the mock server
+        self.client.base_url = base_url
+        # Set the API key in the client's headers with Bearer prefix
+        api_key = kwargs.get('api_key', '')
+        self.client.default_headers["Authorization"] = f"Bearer {api_key}" if api_key else ''
     
     @property
-    def model_name(self) -> str:
-        """Return the model name."""
-        return "test-chat-model"
-    
-    @property
-    def system(self) -> str:
-        """Return the system prompt."""
-        return "You are a helpful test assistant."
-
-@dataclass
-class TestDependencies:
-    """Test dependencies for tracking tool usage."""
-    memory_entries: List[Dict[str, Any]] = None
-    tool_calls: List[Dict[str, Any]] = None
-    
-    def __init__(self):
-        self.memory_entries = []
-        self.tool_calls = []
-        
-    def record_memory(self, entry: Dict[str, Any]):
-        """Record memory entry."""
-        self.memory_entries.append(entry)
-        
-    def record_tool_call(self, tool: str, args: Dict[str, Any]):
-        """Record tool call."""
-        self.tool_calls.append({
-            "tool": tool,
-            "args": args
-        })
+    def base_url(self) -> str:
+        return self._base_url
 
 @pytest.fixture(scope="session")
 def openai_model():

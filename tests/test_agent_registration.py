@@ -1,18 +1,10 @@
 """Test agent registration with Hypha."""
 import pytest
-from typing import List, Dict, Any, Optional
-from pydantic import BaseModel
-from pydantic_ai import RunContext, models, result, exceptions
-
-from schema_agents.schema_reasoning import (
-    ThoughtType, ActionType, MemoryType,
-    Thought, Action, Observation, Plan, ReasoningState
-)
-from schema_agents.memory import SemanticMemory
-from schema_agents.agent import Agent
-from tests.conftest import TestOpenAIModel, TestDependencies
-from tests.test_agent import AnalysisResult
+from schema_agents import Agent
+from pydantic_ai import RunContext
 from hypha_rpc import connect_to_server
+from .test_agent import AnalysisResult
+from .test_utils import TestDependencies
 from pydantic_ai.models.openai import OpenAIModel
 from schema_agents.reasoning import ReasoningStrategy, ReActConfig
 
@@ -29,25 +21,6 @@ def reset_callback_state():
     callback_chunks = []
 
 @pytest.fixture
-def test_model():
-    """Create test model."""
-    return TestOpenAIModel()
-
-@pytest.fixture
-def test_deps():
-    """Create test dependencies."""
-    return TestDependencies()
-
-@pytest.fixture
-def agent(test_model, test_deps):
-    """Create test agent."""
-    return Agent(
-        model=test_model,
-        tools=[],
-        memory=SemanticMemory()
-    )
-
-@pytest.fixture
 def test_agent(openai_model):
     """Create a basic test agent with OpenAI model"""
     return Agent(
@@ -59,6 +32,11 @@ def test_agent(openai_model):
         goal="Help with testing the agent implementation",
         backstory="You are an AI assistant helping with testing."
     )
+
+@pytest.fixture
+def test_deps():
+    """Create test dependencies"""
+    return TestDependencies()
 
 @pytest.fixture
 def structured_agent(openai_model):
