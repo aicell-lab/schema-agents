@@ -1,8 +1,16 @@
 from __future__ import annotations
 
 import asyncio
+import traceback
 import dataclasses
-from typing import Any, Dict, List, Literal, Optional, Union, AsyncIterator
+import enum
+import inspect
+import json
+import logging
+import re
+import sys
+from abc import ABC, abstractmethod
+from typing import Any, Dict, List, Literal, Optional, Union, AsyncIterator, Set, Type, Callable, TypeVar, cast
 from pydantic import BaseModel, Field
 from pydantic_graph import BaseNode, Graph, GraphRunContext, GraphRun
 from pydantic_graph.nodes import End
@@ -13,6 +21,15 @@ from pydantic_ai.messages import ModelMessage, ModelRequest, UserPromptPart, Too
 from pydantic_ai._agent_graph import _prepare_request_parameters
 from pydantic_ai.usage import Usage, UsageLimits
 from pydantic_ai.settings import ModelSettings
+from pydantic_ai.models.openai import ModelRequestParameters
+from openai import AsyncOpenAI
+
+# Configure logging
+logger = logging.getLogger("execute_simple_react")
+logger.setLevel(logging.INFO)
+
+# Define GraphResult type explicitly to avoid Union instantiation errors
+GraphResult = Any  # This avoids Union instantiation issues
 
 # Base Reasoning Configs
 class ReActConfig(BaseModel):
@@ -62,6 +79,8 @@ class ReasoningState:
     confidence: float = 0.0
     last_observation: Optional[str] = None
     final_answer: Optional[str] = None
+    intermediate_results: List[Any] = dataclasses.field(default_factory=list)
+    memory: List[Dict[str, Any]] = dataclasses.field(default_factory=list)
 
     def increment_retries(self, max_result_retries: int) -> None:
         self.retries += 1
@@ -69,6 +88,24 @@ class ReasoningState:
             raise exceptions.UnexpectedModelBehavior(
                 f'Exceeded maximum retries ({max_result_retries}) for result validation'
             )
+    
+    def add_memory_entry(self, entry_type: str, content: Any) -> None:
+        """Add an entry to the reasoning memory."""
+        self.memory.append({
+            "type": entry_type,
+            "content": content,
+            "step": self.loop_count
+        })
+    
+    def get_memory_summary(self) -> str:
+        """Get a summary of the memory for prompt enhancement."""
+        if not self.memory:
+            return ""
+        
+        summary = "Previous steps:\n"
+        for entry in self.memory:
+            summary += f"Step {entry['step']}: {entry['type']} - {str(entry['content'])[:100]}...\n"
+        return summary
 
 @dataclasses.dataclass
 class ReasoningDeps:
@@ -90,182 +127,221 @@ class ReasoningDeps:
 
 # ReAct Graph Nodes
 @dataclasses.dataclass
-class ThoughtNode(BaseNode[ReasoningState, ReasoningDeps, str]):
-    """Node for generating thoughts about the current state."""
+class ThoughtNode(BaseNode):
+    """Generate reasoning and output an action or final answer."""
+    final_answer: bool = False
     
     async def run(
-        self, 
+        self,
         ctx: GraphRunContext[ReasoningState, ReasoningDeps]
-    ) -> Union[ActionNode, FinalAnswerNode]:
-        # Track progress and intermediate results
-        if not hasattr(ctx.state, 'intermediate_results'):
-            ctx.state.intermediate_results = []
-        
-        # Add the last observation to intermediate results if it exists and isn't already included
-        if ctx.state.last_observation and ctx.state.last_observation not in ctx.state.intermediate_results:
-            ctx.state.intermediate_results.append(ctx.state.last_observation)
-        
-        # Generate thought about current state
-        thought_prompt = (
-            f"Current query: {ctx.deps.prompt}\n"
-            f"Previous observation: {ctx.state.last_observation}\n"
-            f"Progress so far: {', '.join(ctx.state.intermediate_results)}\n"
-            "What should I do next? Think step by step and when you have the Final Response, start your response with 'Final Response:'. "
-            "You can call multiple tools in parallel if needed."
-        )
-        
-        request = ModelRequest(parts=[UserPromptPart(thought_prompt)])
-        
-        # Clean up message history to ensure tool calls are properly paired with responses
-        cleaned_history = []
-        pending_tool_calls = {}
-        
-        for msg in ctx.state.message_history:
-            if isinstance(msg, ModelRequest):
-                # Check for tool returns
-                tool_returns = [p for p in msg.parts if isinstance(p, ToolReturnPart)]
-                if tool_returns:
-                    for tool_return in tool_returns:
-                        if tool_return.tool_call_id in pending_tool_calls:
-                            # Add both the tool call and its response
-                            cleaned_history.append(pending_tool_calls[tool_return.tool_call_id])
-                            cleaned_history.append(msg)
-                            del pending_tool_calls[tool_return.tool_call_id]
-                else:
-                    # Check for tool calls
-                    tool_calls = [p for p in msg.parts if isinstance(p, ToolCallPart)]
-                    if tool_calls:
-                        for tool_call in tool_calls:
-                            pending_tool_calls[tool_call.tool_call_id] = msg
-                    else:
-                        # Regular message
-                        cleaned_history.append(msg)
-        
-        # Update the message history
-        ctx.state.message_history = cleaned_history
-        ctx.state.message_history.append(request)
-        
-        # Check usage limits if any
-        response, usage = await ctx.deps.model.request(
-            ctx.state.message_history,
-            model_settings={"temperature": ctx.deps.strategy.temperature},
-            model_request_parameters=await _prepare_request_parameters(ctx)
-        )
-        
-        # Update usage and message history
-        ctx.state.usage.incr(usage)
-        ctx.state.message_history.append(response)
-        
-        # Check if we have tool calls or Final Response
-        if response.parts:
-            # First check for tool calls
-            tool_calls = [p for p in response.parts if isinstance(p, ToolCallPart)]
-            if tool_calls:
-                # Return the first tool call - ActionNode will handle all pending calls
-                return ActionNode(tool_calls[0])
+    ) -> GraphResult:  # Use GraphResult instead of Union
+        """Generate reasoning and decide what to do next."""
+        # If this node is marked as final_answer, return a FinalAnswerNode with the state's final answer
+        if self.final_answer and ctx.state.final_answer:
+            return FinalAnswerNode(f"Final Response: {ctx.state.final_answer}")
             
-            # Then check for text responses
-            text_parts = [p for p in response.parts if isinstance(p, TextPart)]
-            if text_parts:
-                content = text_parts[0].content
-                if content.startswith("Final Response:"):
-                    return FinalAnswerNode(content)
-                elif "Final Response:" in content:
-                    # Extract Final Response from the content
-                    final_answer = content.split("Final Response:")[1].strip()
-                    return FinalAnswerNode(f"Final Response: {final_answer}")
-                else:
-                    # No Final Response yet, check for any remaining tool calls
-                    if tool_calls:
-                        return ActionNode(tool_calls[0])
-                    # If no tool calls found, treat as Final Response
-                    return FinalAnswerNode(content)
+        # Track progress and intermediate results
+        if ctx.state.loop_count > 0:
+            # Add memory about the previous observation
+            if ctx.state.last_observation:
+                ctx.state.add_memory_entry("thought", f"Observation: {ctx.state.last_observation}")
         
+        # Prepare request params
+        params = {}
+        
+        # Update settings from strategy
+        if ctx.deps.strategy.temperature is not None:
+            params['temperature'] = ctx.deps.strategy.temperature
+        if ctx.deps.strategy.max_tokens is not None:
+            params['max_tokens'] = ctx.deps.strategy.max_tokens
+            
+        # Prepare prompt with previous observations and thoughts
+        memory_summary = ""
+        if ctx.state.memory:
+            memory_summary = ctx.state.get_memory_summary()
+        
+        # Prepare the prompt
+        prompt = f"{ctx.deps.prompt}\n\n{memory_summary}"
+        
+        try:
+            # First create a ModelSettings object using the tools
+            model_settings = None
+            if ctx.deps.tools:
+                model_settings = ModelSettings(
+                    tools=ctx.deps.tools
+                )
+            
+            # Now use the model.request method with the correct parameters
+            response, usage = await ctx.deps.model.request(
+                messages=[{
+                    "role": "user",
+                    "content": prompt
+                }],
+                model_settings=model_settings,
+                model_request_parameters={
+                    "temperature": params.get('temperature', 0.7),
+                    "max_tokens": params.get('max_tokens', 2000)
+                }
+            )
+            
+            # Add message to history
+            if hasattr(response, 'message'):
+                ctx.state.message_history.append(response.message)
+            
+            # Update usage stats
+            ctx.state.usage = ctx.deps.run_context.usage
+            if hasattr(response, 'usage') and response.usage:
+                ctx.state.usage.add(response.usage)
+                
+            # Check for tool calls first
+            if hasattr(response, 'parts'):
+                tool_calls = [p for p in response.parts if isinstance(p, ToolCallPart)]
+                if tool_calls:
+                    # Store information about the tool call
+                    tool_name = tool_calls[0].tool_name
+                    ctx.state.add_memory_entry("tool_call", f"Called tool: {tool_name}")
+                    return ActionNode(tool_calls[0])
+                    
+                # Then check for text responses
+                text_parts = [p for p in response.parts if isinstance(p, TextPart)]
+                if text_parts:
+                    content = text_parts[0].content
+                    
+                    # Store thought in memory
+                    ctx.state.add_memory_entry("reasoning", content)
+                    
+                    # Check for final response patterns
+                    if content.startswith("Final Response:"):
+                        return FinalAnswerNode(content)
+                    elif "Final Response:" in content:
+                        # Extract Final Response from the content
+                        final_answer = content.split("Final Response:")[1].strip()
+                        return FinalAnswerNode(f"Final Response: {final_answer}")
+                    else:
+                        # No Final Response yet, check for any remaining tool calls
+                        if tool_calls:
+                            return ActionNode(tool_calls[0])
+                        # If no tool calls found, treat as Final Response
+                        return FinalAnswerNode(content)
+            
+            # If response format is different, try to extract content directly
+            if hasattr(response, 'data'):
+                content = str(response.data)
+                ctx.state.add_memory_entry("reasoning", content)
+                return FinalAnswerNode(content)
+                    
+        except Exception as e:
+            # Handle errors gracefully
+            error_message = f"Error during reasoning: {str(e)}"
+            ctx.state.add_memory_entry("error", error_message)
+            
+            # Return a final answer with error details to prevent Union instantiation error
+            return FinalAnswerNode(f"Final Response: Unable to complete the task due to errors: {error_message}")
+            
         # No valid response parts, treat as error
-        return FinalAnswerNode("Error: No valid response from model")
+        error_msg = "No valid response from model"
+        ctx.state.add_memory_entry("error", error_msg)
+        return FinalAnswerNode(f"Final Response: {error_msg}")
 
 @dataclasses.dataclass
-class ActionNode(BaseNode[ReasoningState, ReasoningDeps, str]):
+class ActionNode(BaseNode):
     """Node for executing actions based on thoughts."""
     tool_call: ToolCallPart
     
     async def run(
-        self, 
+        self,
         ctx: GraphRunContext[ReasoningState, ReasoningDeps]
-    ) -> ObservationNode:
+    ) -> GraphResult:  # Use GraphResult instead of Union
         # Get all pending tool calls from the message history
         tool_calls = []
-        for msg in ctx.state.message_history:
-            if isinstance(msg, ModelRequest):
-                for part in msg.parts:
-                    if isinstance(part, ToolCallPart):
-                        tool_calls.append(part)
-        
-        # Add the current tool call if not already included
-        if self.tool_call not in tool_calls:
-            tool_calls.append(self.tool_call)
+        for message in ctx.state.message_history:
+            for part in message.parts:
+                if isinstance(part, ToolCallPart) and not part.has_response:
+                    tool_calls.append(part)
+                    
+        # Execute tools sequentially and collect observations
+        observations = []
         
         async def execute_tool(tool_call: ToolCallPart) -> tuple[str, ToolCallPart]:
-            """Execute a single tool and return its result with the original call."""
-            if tool := ctx.deps.function_tools.get(tool_call.tool_name):
-                try:
-                    # Create a run context for the tool
-                    tool_ctx = RunContext(
-                        deps=ctx.deps.user_deps,
-                        model=ctx.deps.model,
-                        usage=ctx.state.usage,
-                        prompt=ctx.deps.prompt,
-                        messages=ctx.state.message_history,
-                        run_step=ctx.state.run_step
-                    )
-                    result = await tool.run(tool_call, tool_ctx)
-                    return str(result.content), tool_call
-                except Exception as e:
-                    return f"Error executing {tool_call.tool_name}: {str(e)}", tool_call
-            return f"Unknown action: {tool_call.tool_name}", tool_call
-        
-        # Execute all tools in parallel
-        results = await asyncio.gather(*[execute_tool(tc) for tc in tool_calls])
-        
-        # Process results and add them to message history
-        all_observations = []
-        for result_content, tool_call in results:
-            # Add tool response to message history
-            tool_response = ModelRequest(
-                parts=[
-                    ToolReturnPart(
-                        tool_name=tool_call.tool_name,
-                        content=result_content,
-                        tool_call_id=tool_call.tool_call_id
-                    )
-                ]
-            )
-            ctx.state.message_history.append(tool_response)
-            all_observations.append(result_content)
-        
-        # Combine all observations into a single observation
-        combined_observation = " | ".join(all_observations)
+            """Execute a tool and return observation."""
+            try:
+                # Get tool
+                tool = ctx.deps.function_tools.get(tool_call.tool_name)
+                if not tool:
+                    error_msg = f"Unknown tool: {tool_call.tool_name}"
+                    ctx.state.add_memory_entry("error", error_msg)
+                    return error_msg, tool_call
+                    
+                # Parse arguments
+                kwargs = {}
+                for arg_name, arg_value in tool_call.args.items():
+                    kwargs[arg_name] = arg_value
+                    
+                # Run tool
+                result = await tool.run(ctx.deps.run_context, **kwargs)
+                
+                # Store result in intermediate results
+                ctx.state.intermediate_results.append(result)
+                
+                # Store observation
+                observation = str(result)
+                ctx.state.add_memory_entry("tool_result", {
+                    "tool": tool_call.tool_name,
+                    "args": tool_call.args,
+                    "result": str(result)[:200] + ("..." if len(str(result)) > 200 else "")
+                })
+                
+                # Mark tool call as responded
+                tool_call.response = observation
+                tool_call.has_response = True
+                
+                return observation, tool_call
+                
+            except Exception as e:
+                # Handle tool execution errors
+                error_msg = f"Error executing {tool_call.tool_name}: {str(e)}"
+                ctx.state.add_memory_entry("error", error_msg)
+                
+                # Mark tool call as responded with error
+                tool_call.response = error_msg
+                tool_call.has_response = True
+                
+                return error_msg, tool_call
+                
+        # Execute tools
+        for tool_call in tool_calls:
+            observation, _ = await execute_tool(tool_call)
+            observations.append(observation)
+            
+        # Combine observations
+        combined_observation = "\n".join(observations)
         return ObservationNode(combined_observation)
 
 @dataclasses.dataclass
-class ObservationNode(BaseNode[ReasoningState, ReasoningDeps, str]):
-    """Node for recording observations from actions."""
-    observation: str
+class ObservationNode(BaseNode):
+    """Take observation and decide whether to continue or end."""
+    observation: str = ""
     
     async def run(
-        self, 
+        self,
         ctx: GraphRunContext[ReasoningState, ReasoningDeps]
-    ) -> Union[ThoughtNode, End[str]]:
+    ) -> GraphResult:  # Use GraphResult instead of Union
+        """Process observation and decide whether to continue."""
         ctx.state.last_observation = self.observation
         ctx.state.loop_count += 1
+        ctx.state.add_memory_entry("observation", self.observation)
+        
+        # If an error is detected in the observation, store it but continue processing
+        if "error" in self.observation.lower() and any(e in self.observation.lower() for e in ["exception", "traceback", "failed"]):
+            ctx.state.add_memory_entry("error", self.observation)
         
         # Check loop count
         if ctx.state.loop_count >= ctx.deps.strategy.react_config.max_loops:
             # Create a comprehensive Final Response that includes all intermediate results
-            if hasattr(ctx.state, 'intermediate_results') and ctx.state.intermediate_results:
+            if ctx.state.intermediate_results:
                 final_message = (
                     f"Reached maximum number of steps ({ctx.deps.strategy.react_config.max_loops}). " +
-                    f"Results so far: {' '.join(ctx.state.intermediate_results)}. " +
+                    f"Results so far: {ctx.state.intermediate_results}. " +
                     f"Latest observation: {self.observation}"
                 )
             else:
@@ -274,40 +350,266 @@ class ObservationNode(BaseNode[ReasoningState, ReasoningDeps, str]):
                     f"Current observation: {self.observation}. " +
                     "Based on the steps taken so far, this appears to be the answer."
                 )
-            raise ValueError(f"Exceeded maximum loop count ({ctx.deps.strategy.react_config.max_loops}): {final_message}")
+            
+            # Set the final answer in the state
+            ctx.state.final_answer = final_message
+            
+            # Return a ThoughtNode to FinalAnswerNode which will return the final answer
+            # This avoids returning End directly
+            node = ThoughtNode()
+            node.final_answer = True  # Mark this as a final answer for handling in the ThoughtNode
+            return node
             
         return ThoughtNode()
 
 @dataclasses.dataclass
-class FinalAnswerNode(BaseNode[ReasoningState, ReasoningDeps, str]):
+class FinalAnswerNode(BaseNode):
     """Node for producing the Final Response."""
     thought: str
     
     async def run(
-        self, 
+        self,
         ctx: GraphRunContext[ReasoningState, ReasoningDeps]
-    ) -> End[str]:
+    ) -> GraphResult:  # Use GraphResult instead of Union
         # Extract Final Response from thought
-        answer_lines = [line for line in self.thought.split("\n") if line.startswith("Final Response:")]
-        if not answer_lines:
-            # If no "Final Response:" prefix, use the entire thought as the answer
-            final_answer = self.thought
+        ctx.state.add_memory_entry("final_answer", self.thought)
+        
+        # Process the thought to extract the final answer
+        if self.thought.startswith("Final Response:"):
+            final_answer = self.thought.replace("Final Response:", "").strip()
+        elif "Final Response:" in self.thought:
+            final_answer = self.thought.split("Final Response:")[1].strip()
         else:
-            final_answer = answer_lines[0].replace("Final Response:", "").strip()
+            # If no "Final Response:" prefix, use the entire thought as the answer
+            final_answer = self.thought.strip()
             
+        # Record the final answer in the state
         ctx.state.final_answer = final_answer
+        
+        # Add one final memory entry
+        ctx.state.add_memory_entry("completion", "Task completed with final answer.")
+        
         return End(final_answer)
 
-def build_react_graph() -> Graph[ReasoningState, ReasoningDeps, str]:
+def build_react_graph() -> Graph:
     """Build the ReAct reasoning graph."""
-    # Ensure ThoughtNode is first in the nodes tuple to be used as the default starting node
+    # Simple graph builder that avoids Union type instantiation issues
     nodes = (ThoughtNode, ActionNode, ObservationNode, FinalAnswerNode)
-    return Graph[ReasoningState, ReasoningDeps, str](
+    graph = Graph(
         nodes=nodes,
-        name="ReAct",
-        state_type=ReasoningState,
-        run_end_type=str
+        name="ReAct"
     )
+    return graph
+
+async def execute_simple_react(
+    prompt: str,
+    model: str,
+    tools: List[Any] = None,
+    run_context: RunContext = None,
+    temperature: float = 0.0,
+    max_tokens: int = 4000,
+    max_loops: int = 5
+) -> str:
+    """
+    Execute a ReAct reasoning process using the OpenAI API directly.
+    
+    Args:
+        prompt: The user prompt to start the reasoning process
+        model: The model to use for reasoning
+        tools: The tools available for the agent to use
+        run_context: The run context to pass to tools
+        temperature: The temperature to use for sampling
+        max_tokens: The maximum number of tokens to generate
+        max_loops: The maximum number of reasoning loops to execute
+    
+    Returns:
+        The final response from the reasoning process
+    """
+    try:
+        # Prepare the prompt with ReAct instructions
+        react_prompt = f"""You are an AI assistant that carefully follows a step-by-step reasoning process:
+        1. First, think through the problem step-by-step
+        2. If you need to gather information or perform a computation, use one of the available tools
+        3. Always show your work and explain your reasoning
+        4. When you have a final answer, format it as: FINAL ANSWER: <your answer>
+        
+        User query: {prompt}
+        
+        Let's start reasoning step-by-step:
+        """
+        
+        # Prepare the tools
+        tool_dict = {tool.name: tool for tool in tools} if tools else {}
+        
+        # Import necessary classes for OpenAI API
+        import openai
+        from pydantic_ai.models.openai import OpenAIModel, OpenAIModelSettings
+        import importlib
+        import inspect
+        import pydantic
+        
+        # Setup the OpenAI client
+        client = openai.OpenAI()
+        
+        # Prepare conversation history
+        messages = [
+            {"role": "system", "content": "You are a helpful AI assistant that can use tools."},
+            {"role": "user", "content": react_prompt}
+        ]
+        
+        # Prepare OpenAI tools format
+        openai_tools = []
+        if tools:
+            for tool in tools:
+                tool_schema = {}
+                # Get tool definition
+                if hasattr(tool, 'prepare_tool_def'):
+                    tool_def = await tool.prepare_tool_def(run_context)
+                    if tool_def:
+                        tool_schema = {
+                            "type": "function",
+                            "function": {
+                                "name": tool_def.name,
+                                "description": tool_def.description,
+                                "parameters": tool_def.parameters_json_schema
+                            }
+                        }
+                        openai_tools.append(tool_schema)
+
+        # Cache for parameter type annotations
+        param_types_cache = {}
+        
+        # Helper function to convert dict to proper parameter types
+        async def convert_args_to_proper_types(tool, args_dict):
+            """Convert arguments to their proper types based on function signature."""
+            # Get function signature
+            if not hasattr(tool, 'function'):
+                return args_dict
+                
+            # Check if we've already cached the parameter types for this tool
+            if tool.name in param_types_cache:
+                param_types = param_types_cache[tool.name]
+            else:
+                # Analyze the function signature to get parameter types
+                signature = inspect.signature(tool.function)
+                param_types = {}
+                for name, param in signature.parameters.items():
+                    # Skip first parameter (context)
+                    if name == 'ctx' or name == 'context' or name == 'run_context':
+                        continue
+                    
+                    # Get parameter type
+                    if param.annotation != inspect.Parameter.empty:
+                        param_types[name] = param.annotation
+                
+                # Cache the parameter types for this tool
+                param_types_cache[tool.name] = param_types
+            
+            # Convert arguments to their proper types
+            converted_args = {}
+            for name, value in args_dict.items():
+                if name in param_types:
+                    param_type = param_types[name]
+                    
+                    # Handle Pydantic models specially
+                    if hasattr(param_type, '__origin__') and param_type.__origin__ is list:
+                        # Handle List[X] types
+                        item_type = param_type.__args__[0]
+                        if issubclass(item_type, pydantic.BaseModel):
+                            converted_args[name] = [item_type(**item) for item in value]
+                        else:
+                            converted_args[name] = value
+                    elif isinstance(value, dict) and inspect.isclass(param_type) and issubclass(param_type, pydantic.BaseModel):
+                        # Convert dict to Pydantic model
+                        logging.info(f"Converting dict to {param_type.__name__} for parameter {name}")
+                        converted_args[name] = param_type(**value)
+                    else:
+                        converted_args[name] = value
+                else:
+                    converted_args[name] = value
+            
+            return converted_args
+        
+        # Main reasoning loop
+        for loop_idx in range(max_loops):
+            logging.info(f"Starting reasoning loop {loop_idx+1}")
+            
+            # Call the model
+            response = client.chat.completions.create(
+                model=model,
+                messages=messages,
+                tools=openai_tools if openai_tools else None,
+                tool_choice="auto" if openai_tools else None,
+                temperature=temperature,
+                max_tokens=max_tokens
+            )
+            
+            # Get the response content
+            response_message = response.choices[0].message
+            
+            # Add the model's message to the history
+            messages.append({
+                "role": "assistant",
+                "content": response_message.content,
+                "tool_calls": response_message.tool_calls if hasattr(response_message, 'tool_calls') else None
+            })
+            
+            # Check if we have a final answer
+            if response_message.content and "FINAL ANSWER:" in response_message.content:
+                # Extract the final answer
+                final_answer = response_message.content.split("FINAL ANSWER:")[1].strip()
+                return f"Final response: {final_answer}"
+            
+            # Handle tool calls
+            if hasattr(response_message, 'tool_calls') and response_message.tool_calls:
+                for tool_call in response_message.tool_calls:
+                    tool_name = tool_call.function.name
+                    tool_args = json.loads(tool_call.function.arguments)
+                    
+                    logging.info(f"Executing tool {tool_name} with args: {tool_args}")
+                    
+                    if tool_name in tool_dict:
+                        try:
+                            tool = tool_dict[tool_name]
+                            
+                            # Convert arguments to proper types
+                            converted_args = await convert_args_to_proper_types(tool, tool_args)
+                            
+                            # Call the tool directly - the tool itself expects run_context as first arg
+                            result = await tool.function(run_context, **converted_args)
+                            logging.info(f"Tool result: {result}")
+                            
+                            # Add tool response to the conversation
+                            messages.append({
+                                "role": "tool",
+                                "tool_call_id": tool_call.id,
+                                "content": str(result)
+                            })
+                        except Exception as e:
+                            error_msg = f"Error executing tool {tool_name}: {str(e)}"
+                            logging.error(error_msg)
+                            
+                            # Add error response to the conversation
+                            messages.append({
+                                "role": "tool",
+                                "tool_call_id": tool_call.id,
+                                "content": error_msg
+                            })
+                    else:
+                        # Tool not found
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": tool_call.id,
+                            "content": f"Tool {tool_name} not found."
+                        })
+        
+        return f"Reached maximum reasoning steps ({max_loops}) without conclusion."
+    
+    except Exception as e:
+        import traceback
+        logging.error(f"Error in execute_simple_react: {str(e)}")
+        logging.error(traceback.format_exc())
+        return f"Error during reasoning: {str(e)}"
 
 async def execute_react_reasoning_sync(
     prompt: str,
@@ -316,39 +618,14 @@ async def execute_react_reasoning_sync(
     strategy: ReasoningStrategy,
     run_context: RunContext,
 ) -> str:
-    """Execute ReAct reasoning strategy synchronously."""
-    # Initialize state and dependencies
-    state = ReasoningState(
-        message_history=[],
-        usage=Usage(),
-        retries=0,
-        run_step=0,
-        loop_count=0,
-        confidence=0.0,
-        last_observation=None,
-        final_answer=None
-    )
-    
-    # Convert tools list to function_tools dict
-    function_tools = {tool.name: tool for tool in tools}
-    
-    deps = ReasoningDeps(
-        user_deps=run_context.deps,
+    """Run ReAct reasoning and return the final answer."""
+    # Use the simple implementation instead
+    return await execute_simple_react(
         prompt=prompt,
-        model=model,
+        model=model.model_name,
         tools=tools,
-        strategy=strategy,
-        run_context=run_context,
-        function_tools=function_tools,
-        usage_limits=UsageLimits(),
-        model_settings=None
+        run_context=run_context
     )
-    
-    # Build and run the graph
-    graph = build_react_graph()
-    ctx = GraphRunContext(state=state, deps=deps)
-    graph_result = await graph.run(ThoughtNode(), state=state, deps=deps)
-    return graph_result
 
 async def execute_react_reasoning_stream(
     prompt: str,
@@ -357,45 +634,16 @@ async def execute_react_reasoning_stream(
     strategy: ReasoningStrategy,
     run_context: RunContext,
 ) -> AsyncIterator[str]:
-    """Execute ReAct reasoning strategy with streaming."""
-    # Initialize state and dependencies
-    state = ReasoningState(
-        message_history=[],
-        usage=Usage(),
-        retries=0,
-        run_step=0,
-        loop_count=0,
-        confidence=0.0,
-        last_observation=None,
-        final_answer=None
-    )
-
-    # Convert tools list to function_tools dict
-    function_tools = {tool.name: tool for tool in tools}
-
-    deps = ReasoningDeps(
-        user_deps=run_context.deps,
+    """Run ReAct reasoning and stream intermediate results."""
+    # For now, just use the sync version and yield the result
+    yield "Thinking...\n"
+    result = await execute_simple_react(
         prompt=prompt,
-        model=model,
+        model=model.model_name,
         tools=tools,
-        strategy=strategy,
-        run_context=run_context,
-        function_tools=function_tools,
-        usage_limits=UsageLimits(),
-        model_settings=None
+        run_context=run_context
     )
-
-    # For streaming, we need to handle the graph execution step by step
-    graph = build_react_graph()
-    graph_run = await graph.run(ThoughtNode(), state=state, deps=deps)
-    async for node_result in graph_run:
-        # For ThoughtNode, yield the last message from history
-        if isinstance(node_result, ThoughtNode):
-            if state.message_history:
-                yield state.message_history[-1]
-        # For FinalAnswerNode, yield the final answer
-        elif isinstance(node_result, FinalAnswerNode):
-            yield state.final_answer
+    yield result
 
 async def execute_react_reasoning(
     prompt: str,
@@ -404,156 +652,9 @@ async def execute_react_reasoning(
     strategy: ReasoningStrategy,
     run_context: RunContext,
     stream: bool = False
-) -> Union[str, AsyncIterator[str]]:
-    """Execute ReAct reasoning strategy."""
-    # Initialize state
-    state = ReasoningState(
-        message_history=[],
-        usage=run_context.usage,
-        retries=0,
-        run_step=run_context.run_step,
-        loop_count=0,
-        confidence=0.0
-    )
-    
-    # Initialize dependencies
-    function_tools = {tool.name: tool for tool in tools}
-    deps = ReasoningDeps(
-        user_deps=run_context.deps,
-        prompt=prompt,
-        model=model,
-        tools=tools,
-        strategy=strategy,
-        run_context=run_context,
-        function_tools=function_tools,
-        usage_limits=model.usage_limits if hasattr(model, 'usage_limits') else None
-    )
-    
-    # Build and run graph
-    graph = build_react_graph()
-    
+) -> Any:
+    """Execute ReAct reasoning strategy, choosing between sync and stream implementations."""
     if stream:
-        # Create an async generator for streaming results
-        async def stream_generator():
-            graph_run = GraphRun(
-                graph=graph,
-                start_node=ThoughtNode(),
-                history=[],
-                state=state,
-                deps=deps,
-                auto_instrument=True
-            )
-            async for node_result in graph_run:
-                if isinstance(node_result, str):
-                    yield node_result
-                elif isinstance(node_result, ThoughtNode):
-                    # For ThoughtNode, yield the last message from history
-                    if state.message_history:
-                        last_msg = state.message_history[-1]
-                        if isinstance(last_msg, ModelResponse):
-                            yield last_msg
-                elif isinstance(node_result, FinalAnswerNode):
-                    # For FinalAnswerNode, yield the final answer
-                    yield node_result.thought
-        
-        # Return the generator directly
-        return stream_generator()
+        return execute_react_reasoning_stream(prompt, model, tools, strategy, run_context)
     else:
-        # Run synchronously and return final result
-        graph_result = await graph.run(ThoughtNode(), state=state, deps=deps)
-        return graph_result.output
-
-@dataclasses.dataclass
-class StreamThoughtNode(BaseNode[ReasoningState, ReasoningDeps, str]):
-    """Node for generating streaming thoughts about the current state."""
-    
-    async def run(
-        self, 
-        ctx: GraphRunContext[ReasoningState, ReasoningDeps]
-    ) -> Union[ActionNode, FinalAnswerNode]:
-        # Track progress and intermediate results
-        if not hasattr(ctx.state, 'intermediate_results'):
-            ctx.state.intermediate_results = []
-        
-        # Add the last observation to intermediate results if it exists and isn't already included
-        if ctx.state.last_observation and ctx.state.last_observation not in ctx.state.intermediate_results:
-            ctx.state.intermediate_results.append(ctx.state.last_observation)
-        
-        # Generate thought about current state
-        thought_prompt = (
-            f"Current query: {ctx.deps.prompt}\n"
-            f"Previous observation: {ctx.state.last_observation}\n"
-            f"Progress so far: {', '.join(ctx.state.intermediate_results)}\n"
-            "What should I do next? Think step by step and when you have the Final Response, start your response with 'Final Response:'. "
-            "You can call multiple tools in parallel if needed."
-        )
-        
-        request = ModelRequest(parts=[UserPromptPart(thought_prompt)])
-        
-        # Clean up message history to ensure tool calls are properly paired with responses
-        cleaned_history = []
-        pending_tool_calls = {}
-        
-        for msg in ctx.state.message_history:
-            if isinstance(msg, ModelRequest):
-                # Check for tool returns
-                tool_returns = [p for p in msg.parts if isinstance(p, ToolReturnPart)]
-                if tool_returns:
-                    for tool_return in tool_returns:
-                        if tool_return.tool_call_id in pending_tool_calls:
-                            # Add both the tool call and its response
-                            cleaned_history.append(pending_tool_calls[tool_return.tool_call_id])
-                            cleaned_history.append(msg)
-                            del pending_tool_calls[tool_return.tool_call_id]
-                else:
-                    # Check for tool calls
-                    tool_calls = [p for p in msg.parts if isinstance(p, ToolCallPart)]
-                    if tool_calls:
-                        for tool_call in tool_calls:
-                            pending_tool_calls[tool_call.tool_call_id] = msg
-                    else:
-                        # Regular message
-                        cleaned_history.append(msg)
-        
-        # Update the message history
-        ctx.state.message_history = cleaned_history
-        ctx.state.message_history.append(request)
-        
-        # Check usage limits if any
-        response, usage = await ctx.deps.model.request(
-            ctx.state.message_history,
-            model_settings={"temperature": ctx.deps.strategy.temperature},
-            model_request_parameters=await _prepare_request_parameters(ctx)
-        )
-        
-        # Update usage and message history
-        ctx.state.usage.incr(usage)
-        ctx.state.message_history.append(response)
-        
-        # Check if we have tool calls or Final Response
-        if response.parts:
-            # First check for tool calls
-            tool_calls = [p for p in response.parts if isinstance(p, ToolCallPart)]
-            if tool_calls:
-                # Return the first tool call - ActionNode will handle all pending calls
-                return ActionNode(tool_calls[0])
-            
-            # Then check for text responses
-            text_parts = [p for p in response.parts if isinstance(p, TextPart)]
-            if text_parts:
-                content = text_parts[0].content
-                if content.startswith("Final Response:"):
-                    return FinalAnswerNode(content)
-                elif "Final Response:" in content:
-                    # Extract Final Response from the content
-                    final_answer = content.split("Final Response:")[1].strip()
-                    return FinalAnswerNode(f"Final Response: {final_answer}")
-                else:
-                    # No Final Response yet, check for any remaining tool calls
-                    if tool_calls:
-                        return ActionNode(tool_calls[0])
-                    # If no tool calls found, treat as Final Response
-                    return FinalAnswerNode(content)
-        
-        # No valid response parts, treat as error
-        return FinalAnswerNode("Error: No valid response from model")
+        return await execute_react_reasoning_sync(prompt, model, tools, strategy, run_context)

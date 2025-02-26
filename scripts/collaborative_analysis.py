@@ -92,14 +92,17 @@ class AgentDeps:
     analysis: Optional[AnalysisResult] = None
     report: Optional[Report] = None
     history: List[str] = None
+    memory: List[str] = None
     server: Any = None
     workspace: str = None
     
     def __init__(self):
         self.history = []
+        self.memory = []
     
     async def add_to_history(self, entry: str):
         self.history.append(entry)
+        self.memory.append(entry)  # Add to memory as well
         logger.debug(f"Added to history: {entry}")
 
 # Create the DataPreprocessor Agent
@@ -288,7 +291,19 @@ def create_analyzer_agent(model: models.Model) -> Agent:
                 logger.error(f"Column {col} is not numeric")
                 raise ValueError(f"Column {col} is not numeric")
         
-        corr_matrix = ctx.deps.data[columns].corr().round(3).to_dict()
+        # Create a more structured correlation dictionary
+        df_corr = ctx.deps.data[columns].corr().round(3)
+        
+        # Convert to a nested dictionary structure that matches the expected format
+        corr_matrix = {}
+        for col1 in columns:
+            for col2 in columns:
+                if col1 != col2:
+                    # Create a key for the correlation pair
+                    key = f"{col1}_{col2}"
+                    # Store the correlation value in a nested dictionary
+                    corr_matrix[key] = {"value": df_corr.loc[col1, col2]}
+        
         logger.info("Successfully computed correlation matrix")
         return corr_matrix
     
@@ -336,9 +351,16 @@ def create_reporter_agent(model: models.Model) -> Agent:
         
         # Add correlation section if available
         if analysis_results.correlations:
+            # Format correlations as text
+            correlation_text = "Strong correlations found between features:\n"
+            for pair, data in analysis_results.correlations.items():
+                if isinstance(data, dict) and "value" in data:
+                    correlation_text += f"- {pair}: {data['value']}\n"
+                else:
+                    correlation_text += f"- {pair}: {data}\n"
+            
             sections.append({
-                "Correlations": "Strong correlations found between features:\n" + 
-                "\n".join([f"- {k}: {v}" for k, v in analysis_results.correlations.items()])
+                "Correlations": correlation_text
             })
         
         report = Report(
@@ -371,7 +393,7 @@ def create_coordinator_agent(model: models.Model) -> Agent:
         reasoning_strategy=ReasoningStrategy(
             type="react",
             react_config=ReActConfig(
-                max_loops=5,
+                max_loops=10,
                 min_confidence=0.8
             )
         )
@@ -473,8 +495,8 @@ async def main():
         analysis_result = await analyzer.run(
             """
             Please follow these steps:
-            1. Create a scatter plot with sepal_length vs sepal_width titled 'Sepal Dimensions'
-            2. Create a scatter plot with petal_length vs petal_width titled 'Petal Dimensions'
+            1. Create a scatter plot with 'sepal length (cm)' vs 'sepal width (cm)' titled 'Sepal Dimensions'
+            2. Create a scatter plot with 'petal length (cm)' vs 'petal width (cm)' titled 'Petal Dimensions'
             3. Perform correlation analysis between all numeric columns
             4. Return the analysis results including plot paths and correlations
             """,
