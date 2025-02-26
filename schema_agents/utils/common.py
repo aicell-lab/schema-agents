@@ -4,9 +4,12 @@ import inspect
 import os
 import asyncio
 import uuid
+import logging
 
 from contextvars import ContextVar
 from schema_agents.schema import Session
+
+logger = logging.getLogger(__name__)
 
 current_session = ContextVar('current_session', default=None)
 
@@ -32,15 +35,25 @@ def check_cmd_exists(command) -> int:
     result = os.system(check_command)
     return result
 
-class EventBus:
-    """An event bus class."""
+class NoMoneyException(Exception):
+    """Exception raised when there are insufficient funds."""
+    pass
 
-    def __init__(self, name, logger=None):
-        """Initialize the event bus."""
-        self._callbacks = {}
-        self._logger = logger
+class EventBus:
+    """Simple event bus implementation."""
+    def __init__(self, name="default"):
         self.name = name
-        self._tasks = set()  # Add this line to store task references
+        self._callbacks = {}
+        self._tasks = set()
+        self._logger = logger
+
+    def subscribe(self, event_type: str, callback):
+        """Subscribe to an event type (alias for on)."""
+        return self.on(event_type, callback)
+        
+    def publish(self, event_type: str, data=None):
+        """Publish an event (alias for emit)."""
+        return self.emit(event_type, data)
 
     def on(self, event_name, func):
         """Register an event callback."""
@@ -51,19 +64,19 @@ class EventBus:
         return func
 
     def once(self, event_name, func):
-        """Register an event callback that only run once."""
+        """Register an event callback that only runs once."""
         if self._callbacks.get(event_name):
             self._callbacks[event_name].add(func)
         else:
             self._callbacks[event_name] = {func}
         # mark once callback
-        self._callbacks[event_name].once = True
+        func.once = True
         return func
 
     async def aemit(self, event_name, *data):
-        """Trigger an event."""
+        """Trigger an event asynchronously."""
         futures = []
-        for func in self._callbacks.get(event_name, []):
+        for func in list(self._callbacks.get(event_name, [])):
             try:
                 if inspect.iscoroutinefunction(func):
                     futures.append(func(*data))
@@ -79,11 +92,12 @@ class EventBus:
                         func,
                         e,
                     )
-        await asyncio.gather(*futures)
+        if futures:
+            await asyncio.gather(*futures)
 
     def emit(self, event_name, *data):
         """Trigger an event."""
-        for func in self._callbacks.get(event_name, []):
+        for func in list(self._callbacks.get(event_name, [])):
             try:
                 if inspect.iscoroutinefunction(func):
                     task = asyncio.get_running_loop().create_task(func(*data))
@@ -105,9 +119,16 @@ class EventBus:
     def off(self, event_name, func=None):
         """Remove an event callback."""
         if not func:
-            del self._callbacks[event_name]
+            self._callbacks.pop(event_name, None)
         else:
-            self._callbacks.get(event_name, []).remove(func)
+            callback_set = self._callbacks.get(event_name, set())
+            callback_set.discard(func)
+            if not callback_set:
+                self._callbacks.pop(event_name, None)
+
+    def register_default_events(self):
+        """Register default events."""
+        pass  # Implement if needed
 
     async def stream_callback(self, message):
         if message.type == "function_call":
@@ -117,6 +138,3 @@ class EventBus:
                 print(f'\nGenerating {message.name} ({message.status}): {message.arguments}', flush=True)
         elif message.type == "text":
             print(message.content, end="", flush=True)
-
-    def register_default_events(self):
-        self.on("stream", self.stream_callback)

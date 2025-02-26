@@ -1,3 +1,12 @@
+"""Code interpreter tool for schema-agents."""
+from __future__ import annotations
+
+import sys
+import io
+import ast
+import traceback
+from typing import Any, Dict, Optional, Tuple
+from pydantic import BaseModel, Field, ConfigDict
 import os
 # from simpleaichat import AIChat
 import re
@@ -68,13 +77,17 @@ def extract_code_blocks(text):
     matches = re.findall(pattern, text, re.MULTILINE)
     return matches
 
-def extract_stdout(results):
-    output = results["outputs"]
-    return "\n".join([item['stdout'] for item in output if 'stdout' in item])
+def extract_stdout(output: str) -> str:
+    """Extract stdout from combined output."""
+    if "stdout:" not in output:
+        return output
+    return output.split("stdout:", 1)[1].split("stderr:", 1)[0].strip()
 
-def extract_stderr(results):
-    output = results["outputs"]
-    return "\n".join([item['stderr'] for item in output if 'stderr' in item])
+def extract_stderr(output: str) -> str:
+    """Extract stderr from combined output."""
+    if "stderr:" not in output:
+        return ""
+    return output.split("stderr:", 1)[1].strip()
 
 def extract_error(results):
     output = results["outputs"]
@@ -88,7 +101,98 @@ def extract_display_data(results):
     output = results["outputs"]
     return "\n".join([item['display_data'] for item in output if 'display_data' in item])
 
-class CodeInterpreter:
+class CodeInterpreter(BaseModel):
+    """Python code interpreter with safety checks."""
+    globals: Dict[str, Any] = Field(default_factory=dict)
+    locals: Dict[str, Any] = Field(default_factory=dict)
+    max_iterations: int = Field(default=1000)
+    timeout: float = Field(default=5.0)
+    model_config = ConfigDict(extra="allow")
+
+    def __init__(self, **data):
+        super().__init__(**data)
+        self.globals = globals().copy()
+        self.locals = {}
+
+    def validate_code(self, code: str) -> bool:
+        """Validate code for safety."""
+        try:
+            tree = ast.parse(code)
+        except SyntaxError:
+            return False
+
+        for node in ast.walk(tree):
+            # Check for dangerous operations
+            if isinstance(node, (ast.Import, ast.ImportFrom)):
+                if any(name.name in ["os", "sys", "subprocess"] 
+                      for name in node.names):
+                    return False
+            elif isinstance(node, ast.Call):
+                if isinstance(node.func, ast.Name):
+                    if node.func.id in ["eval", "exec", "compile"]:
+                        return False
+                elif isinstance(node.func, ast.Attribute):
+                    if node.func.attr in ["system", "popen", "spawn"]:
+                        return False
+
+        return True
+
+    def execute(self, code: str) -> Tuple[Any, str, str]:
+        """Execute code and return result, stdout, and stderr."""
+        if not self.validate_code(code):
+            raise ValueError("Code validation failed")
+
+        # Capture stdout and stderr
+        old_stdout = sys.stdout
+        old_stderr = sys.stderr
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        sys.stdout = stdout
+        sys.stderr = stderr
+
+        try:
+            # Execute code
+            result = eval(code, self.globals, self.locals)
+            stdout_output = stdout.getvalue()
+            stderr_output = stderr.getvalue()
+            return result, stdout_output, stderr_output
+        except Exception as e:
+            stderr.write(f"Error: {str(e)}\n")
+            stderr.write(traceback.format_exc())
+            return None, stdout.getvalue(), stderr.getvalue()
+        finally:
+            sys.stdout = old_stdout
+            sys.stderr = old_stderr
+
+    def execute_cell(self, code: str) -> str:
+        """Execute code cell and return formatted output."""
+        try:
+            result, stdout, stderr = self.execute(code)
+            output = []
+            if stdout:
+                output.append(f"stdout: {stdout}")
+            if stderr:
+                output.append(f"stderr: {stderr}")
+            if result is not None:
+                output.append(f"result: {result}")
+            return "\n".join(output)
+        except Exception as e:
+            return f"Error: {str(e)}"
+
+    def get_variable(self, name: str) -> Optional[Any]:
+        """Get variable value from interpreter scope."""
+        return self.locals.get(name)
+
+    def set_variable(self, name: str, value: Any) -> None:
+        """Set variable in interpreter scope."""
+        self.locals[name] = value
+
+    def clear(self) -> None:
+        """Clear interpreter state."""
+        self.locals.clear()
+        self.globals = globals().copy()
+
+class CodeInterpreterTool:
     MAIN_SESSION_ID = "main"
 
     def __init__(self, bot=None, session_id=None, work_dir_root="./.code-interpreter"):

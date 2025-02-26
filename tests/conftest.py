@@ -7,15 +7,21 @@ import uuid
 import pytest
 import pytest_asyncio
 import requests
+import json
 from pydantic_ai.models.openai import OpenAIModel
 import asyncio
 from fastapi import FastAPI, Request, HTTPException
 from hypha_rpc.utils.serve import create_openai_chat_server
 import uvicorn
-import json
 import httpx
 import socket
 from fastapi.responses import StreamingResponse
+from dataclasses import dataclass
+from typing import List, Dict, Any, Optional, Tuple
+from pydantic import BaseModel
+from pydantic_ai import RunContext, models, result
+from pydantic_ai.messages import ModelMessage, ModelRequest, ModelResponse, TextPart, ToolReturnPart, ToolCallPart
+from pydantic_ai.usage import Usage
 
 # Test server configuration
 WS_PORT = 9573
@@ -445,19 +451,118 @@ async def mock_openai_server():
             pass
 
 class TestOpenAIModel(OpenAIModel):
-    """Custom OpenAI model that uses a mock server."""
-    def __init__(self, base_url: str, **kwargs):
-        super().__init__(**kwargs)
-        self._base_url = base_url
-        # Configure the client to use the mock server
-        self.client.base_url = base_url
-        # Set the API key in the client's headers with Bearer prefix
-        api_key = kwargs.get('api_key', '')
-        self.client.default_headers["Authorization"] = f"Bearer {api_key}" if api_key else ''
+    """Test OpenAI model implementation."""
+    
+    def __init__(self, base_url: str = None, api_key: str = "test-key", model_name: str = "test-chat-model"):
+        super().__init__(base_url=base_url, api_key=api_key)
+        self._model_name = model_name
+        self._step = 0
     
     @property
-    def base_url(self) -> str:
-        return self._base_url
+    def model_name(self) -> str:
+        """Return the model name."""
+        return self._model_name
+    
+    @property
+    def system(self) -> str:
+        """Return the system prompt."""
+        return "You are a helpful test assistant."
+    
+    async def request(
+        self,
+        message_history: List[ModelMessage],
+        model_settings: Dict[str, Any] | None = None,
+        request_parameters: Dict[str, Any] | None = None,
+    ) -> Tuple[ModelResponse, Usage]:
+        """Process a request and return a mock response."""
+        self._step += 1
+        
+        # Get the last request
+        last_message = message_history[-1]
+        if not isinstance(last_message, ModelRequest):
+            return ModelResponse(
+                parts=[TextPart(content="I don't understand")],
+                model_name=self.model_name
+            ), Usage()
+        
+        content = last_message.parts[0].content
+        
+        # Handle tool-based interactions
+        if "calculate" in content.lower():
+            return ModelResponse(
+                parts=[
+                    ToolCallPart(
+                        tool_calls=[{
+                            "id": "call-1",
+                            "type": "function",
+                            "function": {
+                                "name": "calculate",
+                                "arguments": json.dumps({"expression": "2 + 2"})
+                            }
+                        }]
+                    )
+                ],
+                model_name=self.model_name
+            ), Usage()
+        elif "search" in content.lower() or "wikipedia" in content.lower():
+            return ModelResponse(
+                parts=[
+                    ToolCallPart(
+                        tool_calls=[{
+                            "id": "call-2",
+                            "type": "function",
+                            "function": {
+                                "name": "search_wikipedia",
+                                "arguments": json.dumps({"query": "test query"})
+                            }
+                        }]
+                    )
+                ],
+                model_name=self.model_name
+            ), Usage()
+        elif "tool return" in content.lower():
+            return ModelResponse(
+                parts=[
+                    ToolReturnPart(
+                        tool_returns=[{
+                            "id": "call-1",
+                            "type": "function",
+                            "function": {
+                                "name": "calculate",
+                                "arguments": json.dumps({"result": 4})
+                            }
+                        }]
+                    )
+                ],
+                model_name=self.model_name
+            ), Usage()
+        
+        # Default text response
+        return ModelResponse(
+            parts=[TextPart(content=f"Test response {self._step}")],
+            model_name=self.model_name
+        ), Usage()
+
+@dataclass
+class TestDependencies:
+    """Test dependencies for tracking tool usage."""
+    memory_entries: List[Dict[str, Any]] = None
+    tool_calls: List[Dict[str, Any]] = None
+    
+    def __init__(self):
+        self.memory_entries = []
+        self.tool_calls = []
+        
+    def record_memory(self, entry: Dict[str, Any]):
+        """Record memory entry."""
+        self.memory_entries.append(entry)
+        
+    def record_tool_call(self, tool: str, args: Dict[str, Any]):
+        """Record tool call."""
+        self.tool_calls.append({
+            "tool": tool,
+            "args": args
+        })
 
 @pytest.fixture(scope="session")
 def openai_model():

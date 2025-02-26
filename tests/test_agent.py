@@ -15,8 +15,14 @@ from pydantic_ai.tools import Tool
 from schema_agents.agent import Agent
 from schema_agents.reasoning import ReasoningStrategy, ReActConfig
 from hypha_rpc import connect_to_server
-from .conftest import TestOpenAIModel
-from .test_utils import TestDependencies
+from tests.conftest import TestOpenAIModel
+from tests.test_utils import TestDependencies
+
+from schema_agents.schema_reasoning import (
+    ThoughtType, ActionType, MemoryType,
+    Thought, Action, Observation, Plan, ReasoningState
+)
+from schema_agents.memory import SemanticMemory
 
 # Load environment variables
 load_dotenv()
