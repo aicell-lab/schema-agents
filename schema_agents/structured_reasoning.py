@@ -42,11 +42,59 @@ def import_time() -> str:
     """Import time for timestamping."""
     return datetime.now().isoformat()
 
+# Define Pydantic models for state management
+class MemoryEntry(BaseModel):
+    """Model for a memory entry in the episodic memory."""
+    type: str = Field(..., description="Type of memory entry (prompt, thought, action, etc.)")
+    content: Any = Field(..., description="Content of the memory entry")
+    step: int = Field(..., description="Step number when this entry was created")
+    timestamp: str = Field(default_factory=import_time, description="Timestamp when this entry was created")
+
+class StructuredReasoningState(BaseModel):
+    """State model for structured reasoning execution."""
+    message_history: List[Any] = Field(default_factory=list, description="History of model messages")
+    usage: Usage = Field(default_factory=Usage, description="Usage statistics")
+    step_count: int = Field(0, description="Current step count")
+    current_plan: Optional[List[str]] = Field(None, description="Current plan steps if available")
+    episodic_memory: List[MemoryEntry] = Field(default_factory=list, description="Episodic memory entries")
+    final_message: Optional[str] = Field(None, description="Final message to return")
+    
+    def add_memory_entry(self, entry_type: str, content: Any) -> None:
+        """Add an entry to the episodic memory."""
+        self.episodic_memory.append(
+            MemoryEntry(
+                type=entry_type,
+                content=content,
+                step=self.step_count,
+                timestamp=import_time()
+            )
+        )
+    
+    def get_memory_summary(self) -> str:
+        """Get a summary of the memory for prompt enhancement."""
+        if not self.episodic_memory:
+            return ""
+        
+        summary = "Previous steps:\n"
+        for entry in self.episodic_memory:
+            summary += f"Step {entry.step}: {entry.type} - {str(entry.content)[:100]}...\n"
+        return summary
+    
+    def get_current_plan_text(self) -> str:
+        """Get the current plan as formatted text."""
+        if not self.current_plan:
+            return "No plan has been created yet."
+        
+        plan_text = "Current Plan:\n"
+        for i, step in enumerate(self.current_plan, 1):
+            plan_text += f"{i}. {step}\n"
+        return plan_text
+
 async def execute_structured_reasoning(
     prompt: str,
     model: models.Model,
     tools: List[Tool],
-    strategy: ReasoningStrategy,
+    strategy: 'ReasoningStrategy',
     run_context: RunContext,
     stream: bool = False
 ) -> Any:
@@ -70,23 +118,11 @@ async def execute_structured_reasoning(
             if hasattr(tool, 'name'):
                 function_tools[tool.name] = tool
         
-        # Create initial state
-        state = {
-            "message_history": [],
-            "usage": Usage(),
-            "step_count": 0,
-            "current_plan": None,
-            "episodic_memory": [],
-            "final_message": None
-        }
+        # Create initial state using Pydantic model
+        state = StructuredReasoningState()
         
         # Add initial memory entry
-        state["episodic_memory"].append({
-            "type": "prompt",
-            "content": prompt,
-            "step": state["step_count"],
-            "timestamp": import_time()
-        })
+        state.add_memory_entry("prompt", prompt)
         
         # Prepare the system prompt for structured reasoning
         system_prompt = """You are an AI assistant that follows a structured reasoning process.
@@ -118,17 +154,10 @@ Always format your response as a JSON object with the following structure:
             
             while current_step < max_steps:
                 # Prepare the prompt with previous observations and thoughts
-                memory_summary = ""
-                if state["episodic_memory"]:
-                    memory_entries = [f"Step {e['step']}: {e['type']} - {str(e['content'])[:100]}..." for e in state["episodic_memory"]]
-                    memory_summary = "Previous steps:\n" + "\n".join(memory_entries)
+                memory_summary = state.get_memory_summary()
                 
                 # Include current plan if available
-                plan_text = ""
-                if state["current_plan"]:
-                    plan_text = "Current Plan:\n"
-                    for i, step in enumerate(state["current_plan"], 1):
-                        plan_text += f"{i}. {step}\n"
+                plan_text = state.get_current_plan_text()
                 
                 # Prepare the full prompt
                 full_prompt = f"{prompt}\n\n{plan_text}\n\n{memory_summary}"
@@ -145,21 +174,77 @@ Always format your response as a JSON object with the following structure:
                 openai_tools = []
                 if tools:
                     for tool in tools:
-                        openai_tool = {
-                            "type": "function",
-                            "function": {
-                                "name": tool.name,
-                                "description": tool.description,
-                                "parameters": tool.parameters
+                        # Get tool definition using prepare_tool_def if available
+                        if hasattr(tool, 'prepare_tool_def'):
+                            # Create a minimal run context for the tool
+                            minimal_ctx = RunContext(
+                                deps=None,
+                                model=model,
+                                usage=Usage(),
+                                prompt=prompt,
+                                messages=[],
+                                run_step=0
+                            )
+                            
+                            # Get tool definition
+                            tool_def = await tool.prepare_tool_def(minimal_ctx)
+                            if tool_def:
+                                openai_tool = {
+                                    "type": "function",
+                                    "function": {
+                                        "name": tool_def.name,
+                                        "description": tool_def.description,
+                                        "parameters": tool_def.parameters_json_schema
+                                    }
+                                }
+                                openai_tools.append(openai_tool)
+                        # Fallback for tools that don't have prepare_tool_def
+                        elif hasattr(tool, 'name') and hasattr(tool, 'description'):
+                            # Try to extract parameters from the tool's signature
+                            parameters = {}
+                            if hasattr(tool, 'run') and callable(tool.run):
+                                import inspect
+                                sig = inspect.signature(tool.run)
+                                parameters = {
+                                    "type": "object",
+                                    "properties": {},
+                                    "required": []
+                                }
+                                
+                                # Skip the first parameter (ctx) and extract the rest
+                                for i, (param_name, param) in enumerate(list(sig.parameters.items())[1:]):
+                                    if param.annotation != inspect.Parameter.empty:
+                                        param_type = "string"
+                                        if param.annotation == int:
+                                            param_type = "integer"
+                                        elif param.annotation == float:
+                                            param_type = "number"
+                                        elif param.annotation == bool:
+                                            param_type = "boolean"
+                                        
+                                        parameters["properties"][param_name] = {
+                                            "type": param_type,
+                                            "description": f"Parameter {param_name}"
+                                        }
+                                        
+                                        if param.default == inspect.Parameter.empty:
+                                            parameters["required"].append(param_name)
+                            
+                            openai_tool = {
+                                "type": "function",
+                                "function": {
+                                    "name": tool.name,
+                                    "description": tool.description,
+                                    "parameters": parameters
+                                }
                             }
-                        }
-                        openai_tools.append(openai_tool)
+                            openai_tools.append(openai_tool)
                 
                 # Request from the model
                 chunks.append(f"Thinking (step {current_step + 1})...\n")
                 
                 response, usage = await model.request(
-                    messages=[
+                    message_history=[
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": full_prompt}
                     ],
@@ -173,7 +258,7 @@ Always format your response as a JSON object with the following structure:
                 
                 # Update usage stats
                 if hasattr(response, 'usage') and response.usage:
-                    state["usage"].add(response.usage)
+                    state.usage.add(response.usage)
                 
                 # Extract the structured reasoning result
                 structured_result = None
@@ -182,34 +267,19 @@ Always format your response as a JSON object with the following structure:
                     structured_result = StructuredReasoningResult(**response.data)
                     
                     # Store the thought in memory
-                    state["episodic_memory"].append({
-                        "type": "thought",
-                        "content": structured_result.thought,
-                        "step": current_step,
-                        "timestamp": import_time()
-                    })
+                    state.add_memory_entry("thought", structured_result.thought)
                     
                     # Update the plan if provided
                     if structured_result.plan:
-                        state["current_plan"] = structured_result.plan
-                        state["episodic_memory"].append({
-                            "type": "plan",
-                            "content": structured_result.plan,
-                            "step": current_step,
-                            "timestamp": import_time()
-                        })
+                        state.current_plan = structured_result.plan
+                        state.add_memory_entry("plan", structured_result.plan)
                     
                     # Yield the thought
                     chunks.append(f"Thought: {structured_result.thought}\n")
                     
                     # Check if we have an action to execute
                     if structured_result.action:
-                        state["episodic_memory"].append({
-                            "type": "action",
-                            "content": structured_result.action,
-                            "step": current_step,
-                            "timestamp": import_time()
-                        })
+                        state.add_memory_entry("action", structured_result.action)
                         
                         # Execute the script
                         chunks.append(f"Executing script...\n")
@@ -268,12 +338,7 @@ Always format your response as a JSON object with the following structure:
                                 script_result = f"Script execution timed out after {timeout} seconds"
                             
                             # Store the result in memory
-                            state["episodic_memory"].append({
-                                "type": "script_result",
-                                "content": script_result,
-                                "step": current_step,
-                                "timestamp": import_time()
-                            })
+                            state.add_memory_entry("script_result", script_result)
                             
                             # Yield the script result
                             chunks.append(f"Script result: {script_result}\n")
@@ -281,12 +346,7 @@ Always format your response as a JSON object with the following structure:
                         except Exception as e:
                             # Handle errors gracefully
                             error_message = f"Error executing script: {str(e)}"
-                            state["episodic_memory"].append({
-                                "type": "script_error",
-                                "content": error_message,
-                                "step": current_step,
-                                "timestamp": import_time()
-                            })
+                            state.add_memory_entry("script_error", error_message)
                             
                             # Yield the error
                             chunks.append(f"Error: {error_message}\n")
@@ -295,27 +355,17 @@ Always format your response as a JSON object with the following structure:
                     chunks.append(f"Message: {structured_result.message}\n")
                     
                     # Store the message in memory
-                    state["episodic_memory"].append({
-                        "type": "message",
-                        "content": structured_result.message,
-                        "step": current_step,
-                        "timestamp": import_time()
-                    })
+                    state.add_memory_entry("message", structured_result.message)
                     
                     # Check if we're done
-                    if not structured_result.action and (not state["current_plan"] or current_step >= max_steps - 1):
+                    if not structured_result.action and (not state.current_plan or current_step >= max_steps - 1):
                         # Set the final message
-                        state["final_message"] = structured_result.message
+                        state.final_message = structured_result.message
                         break
                 else:
                     # No valid response
                     error_message = "No valid response from model"
-                    state["episodic_memory"].append({
-                        "type": "error",
-                        "content": error_message,
-                        "step": current_step,
-                        "timestamp": import_time()
-                    })
+                    state.add_memory_entry("error", error_message)
                     
                     # Yield the error
                     chunks.append(f"Error: {error_message}\n")
@@ -323,66 +373,67 @@ Always format your response as a JSON object with the following structure:
                 
                 # Increment step count
                 current_step += 1
-                state["step_count"] = current_step
+                state.step_count = current_step
                 
                 # Check if we've reached the maximum steps
                 if current_step >= max_steps:
                     # Set a final message if not already set
-                    if not state["final_message"]:
-                        state["final_message"] = f"Reached maximum number of steps ({max_steps})"
+                    if not state.final_message:
+                        state.final_message = f"Reached maximum number of steps ({max_steps})"
                     break
             
             # Check if we need to summarize memory
-            if strategy.structured_config.summarize_memory and strategy.structured_config.memory_enabled:
-                try:
-                    # Generate a summary of the episodic memory
-                    memory_entries = [f"Step {e['step']}: {e['type']} - {str(e['content'])}" for e in state["episodic_memory"]]
-                    memory_text = "\n".join(memory_entries)
-                    
-                    # Create a prompt for summarization
-                    summary_prompt = f"""Please summarize the following reasoning steps:
+            if hasattr(strategy, 'structured_config') and hasattr(strategy.structured_config, 'summarize_memory') and hasattr(strategy.structured_config, 'memory_enabled'):
+                if strategy.structured_config.summarize_memory and strategy.structured_config.memory_enabled:
+                    try:
+                        # Generate a summary of the episodic memory
+                        memory_entries = [f"Step {e.step}: {e.type} - {str(e.content)}" for e in state.episodic_memory]
+                        memory_text = "\n".join(memory_entries)
+                        
+                        # Create a prompt for summarization
+                        summary_prompt = f"""Please summarize the following reasoning steps:
 
 {memory_text}
 
 Provide a concise summary of the reasoning process, key insights, and conclusions."""
-                    
-                    # Request a summary from the model
-                    chunks.append(f"Generating summary...\n")
-                    
-                    response, _ = await model.request(
-                        messages=[{
-                            "role": "user",
-                            "content": summary_prompt
-                        }],
-                        model_request_parameters={
-                            "temperature": 0.3,
-                            "max_tokens": 500
-                        }
-                    )
-                    
-                    # Extract the summary
-                    summary = ""
-                    if hasattr(response, 'parts'):
-                        text_parts = [p for p in response.parts if isinstance(p, TextPart)]
-                        if text_parts:
-                            summary = text_parts[0].content
-                    elif hasattr(response, 'data'):
-                        summary = str(response.data)
-                    
-                    # Add the summary to the final message
-                    if summary:
-                        final_message = state["final_message"] or ""
-                        state["final_message"] = f"{final_message}\n\nSummary of reasoning:\n{summary}"
                         
-                        # Yield the summary
-                        chunks.append(f"Summary: {summary}\n")
-                
-                except Exception as e:
-                    # If summarization fails, just continue with the original message
-                    logger.error(f"Error generating memory summary: {str(e)}")
+                        # Request a summary from the model
+                        chunks.append(f"Generating summary...\n")
+                        
+                        response, _ = await model.request(
+                            message_history=[{
+                                "role": "user",
+                                "content": summary_prompt
+                            }],
+                            model_request_parameters={
+                                "temperature": 0.3,
+                                "max_tokens": 500
+                            }
+                        )
+                        
+                        # Extract the summary
+                        summary = ""
+                        if hasattr(response, 'parts'):
+                            text_parts = [p for p in response.parts if isinstance(p, TextPart)]
+                            if text_parts:
+                                summary = text_parts[0].content
+                        elif hasattr(response, 'data'):
+                            summary = str(response.data)
+                        
+                        # Add the summary to the final message
+                        if summary:
+                            final_message = state.final_message or ""
+                            state.final_message = f"{final_message}\n\nSummary of reasoning:\n{summary}"
+                            
+                            # Yield the summary
+                            chunks.append(f"Summary: {summary}\n")
+                    
+                    except Exception as e:
+                        # If summarization fails, just continue with the original message
+                        logger.error(f"Error generating memory summary: {str(e)}")
             
             # Yield the final message
-            final_message = state["final_message"] or "Reasoning completed"
+            final_message = state.final_message or "Reasoning completed"
             chunks.append(f"Final result: {final_message}\n")
             
             # Create an async generator to yield the chunks
@@ -398,17 +449,10 @@ Provide a concise summary of the reasoning process, key insights, and conclusion
             
             while current_step < max_steps:
                 # Prepare the prompt with previous observations and thoughts
-                memory_summary = ""
-                if state["episodic_memory"]:
-                    memory_entries = [f"Step {e['step']}: {e['type']} - {str(e['content'])[:100]}..." for e in state["episodic_memory"]]
-                    memory_summary = "Previous steps:\n" + "\n".join(memory_entries)
+                memory_summary = state.get_memory_summary()
                 
                 # Include current plan if available
-                plan_text = ""
-                if state["current_plan"]:
-                    plan_text = "Current Plan:\n"
-                    for i, step in enumerate(state["current_plan"], 1):
-                        plan_text += f"{i}. {step}\n"
+                plan_text = state.get_current_plan_text()
                 
                 # Prepare the full prompt
                 full_prompt = f"{prompt}\n\n{plan_text}\n\n{memory_summary}"
@@ -425,19 +469,75 @@ Provide a concise summary of the reasoning process, key insights, and conclusion
                 openai_tools = []
                 if tools:
                     for tool in tools:
-                        openai_tool = {
-                            "type": "function",
-                            "function": {
-                                "name": tool.name,
-                                "description": tool.description,
-                                "parameters": tool.parameters
+                        # Get tool definition using prepare_tool_def if available
+                        if hasattr(tool, 'prepare_tool_def'):
+                            # Create a minimal run context for the tool
+                            minimal_ctx = RunContext(
+                                deps=None,
+                                model=model,
+                                usage=Usage(),
+                                prompt=prompt,
+                                messages=[],
+                                run_step=0
+                            )
+                            
+                            # Get tool definition
+                            tool_def = await tool.prepare_tool_def(minimal_ctx)
+                            if tool_def:
+                                openai_tool = {
+                                    "type": "function",
+                                    "function": {
+                                        "name": tool_def.name,
+                                        "description": tool_def.description,
+                                        "parameters": tool_def.parameters_json_schema
+                                    }
+                                }
+                                openai_tools.append(openai_tool)
+                        # Fallback for tools that don't have prepare_tool_def
+                        elif hasattr(tool, 'name') and hasattr(tool, 'description'):
+                            # Try to extract parameters from the tool's signature
+                            parameters = {}
+                            if hasattr(tool, 'run') and callable(tool.run):
+                                import inspect
+                                sig = inspect.signature(tool.run)
+                                parameters = {
+                                    "type": "object",
+                                    "properties": {},
+                                    "required": []
+                                }
+                                
+                                # Skip the first parameter (ctx) and extract the rest
+                                for i, (param_name, param) in enumerate(list(sig.parameters.items())[1:]):
+                                    if param.annotation != inspect.Parameter.empty:
+                                        param_type = "string"
+                                        if param.annotation == int:
+                                            param_type = "integer"
+                                        elif param.annotation == float:
+                                            param_type = "number"
+                                        elif param.annotation == bool:
+                                            param_type = "boolean"
+                                        
+                                        parameters["properties"][param_name] = {
+                                            "type": param_type,
+                                            "description": f"Parameter {param_name}"
+                                        }
+                                        
+                                        if param.default == inspect.Parameter.empty:
+                                            parameters["required"].append(param_name)
+                            
+                            openai_tool = {
+                                "type": "function",
+                                "function": {
+                                    "name": tool.name,
+                                    "description": tool.description,
+                                    "parameters": parameters
+                                }
                             }
-                        }
-                        openai_tools.append(openai_tool)
+                            openai_tools.append(openai_tool)
                 
                 # Request from the model
                 response, usage = await model.request(
-                    messages=[
+                    message_history=[
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": full_prompt}
                     ],
@@ -451,7 +551,7 @@ Provide a concise summary of the reasoning process, key insights, and conclusion
                 
                 # Update usage stats
                 if hasattr(response, 'usage') and response.usage:
-                    state["usage"].add(response.usage)
+                    state.usage.add(response.usage)
                 
                 # Extract the structured reasoning result
                 structured_result = None
@@ -460,31 +560,16 @@ Provide a concise summary of the reasoning process, key insights, and conclusion
                     structured_result = StructuredReasoningResult(**response.data)
                     
                     # Store the thought in memory
-                    state["episodic_memory"].append({
-                        "type": "thought",
-                        "content": structured_result.thought,
-                        "step": current_step,
-                        "timestamp": import_time()
-                    })
+                    state.add_memory_entry("thought", structured_result.thought)
                     
                     # Update the plan if provided
                     if structured_result.plan:
-                        state["current_plan"] = structured_result.plan
-                        state["episodic_memory"].append({
-                            "type": "plan",
-                            "content": structured_result.plan,
-                            "step": current_step,
-                            "timestamp": import_time()
-                        })
+                        state.current_plan = structured_result.plan
+                        state.add_memory_entry("plan", structured_result.plan)
                     
                     # Check if we have an action to execute
                     if structured_result.action:
-                        state["episodic_memory"].append({
-                            "type": "action",
-                            "content": structured_result.action,
-                            "step": current_step,
-                            "timestamp": import_time()
-                        })
+                        state.add_memory_entry("action", structured_result.action)
                         
                         try:
                             # Create a temporary file for the script
@@ -540,107 +625,88 @@ Provide a concise summary of the reasoning process, key insights, and conclusion
                                 script_result = f"Script execution timed out after {timeout} seconds"
                             
                             # Store the result in memory
-                            state["episodic_memory"].append({
-                                "type": "script_result",
-                                "content": script_result,
-                                "step": current_step,
-                                "timestamp": import_time()
-                            })
+                            state.add_memory_entry("script_result", script_result)
                             
                         except Exception as e:
                             # Handle errors gracefully
                             error_message = f"Error executing script: {str(e)}"
-                            state["episodic_memory"].append({
-                                "type": "script_error",
-                                "content": error_message,
-                                "step": current_step,
-                                "timestamp": import_time()
-                            })
+                            state.add_memory_entry("script_error", error_message)
                     
                     # Store the message in memory
-                    state["episodic_memory"].append({
-                        "type": "message",
-                        "content": structured_result.message,
-                        "step": current_step,
-                        "timestamp": import_time()
-                    })
+                    state.add_memory_entry("message", structured_result.message)
                     
                     # Check if we're done
-                    if not structured_result.action and (not state["current_plan"] or current_step >= max_steps - 1):
+                    if not structured_result.action and (not state.current_plan or current_step >= max_steps - 1):
                         # Set the final message
-                        state["final_message"] = structured_result.message
+                        state.final_message = structured_result.message
                         break
                 else:
                     # No valid response
                     error_message = "No valid response from model"
-                    state["episodic_memory"].append({
-                        "type": "error",
-                        "content": error_message,
-                        "step": current_step,
-                        "timestamp": import_time()
-                    })
+                    state.add_memory_entry("error", error_message)
                     
                     # Set the final message
-                    state["final_message"] = error_message
+                    state.final_message = error_message
                     break
                 
                 # Increment step count
                 current_step += 1
-                state["step_count"] = current_step
+                state.step_count = current_step
                 
                 # Check if we've reached the maximum steps
                 if current_step >= max_steps:
                     # Set a final message if not already set
-                    if not state["final_message"]:
-                        state["final_message"] = f"Reached maximum number of steps ({max_steps})"
+                    if not state.final_message:
+                        state.final_message = f"Reached maximum number of steps ({max_steps})"
                     break
             
             # Check if we need to summarize memory
-            if strategy.structured_config.summarize_memory and strategy.structured_config.memory_enabled:
-                try:
-                    # Generate a summary of the episodic memory
-                    memory_entries = [f"Step {e['step']}: {e['type']} - {str(e['content'])}" for e in state["episodic_memory"]]
-                    memory_text = "\n".join(memory_entries)
-                    
-                    # Create a prompt for summarization
-                    summary_prompt = f"""Please summarize the following reasoning steps:
+            if hasattr(strategy, 'structured_config') and hasattr(strategy.structured_config, 'summarize_memory') and hasattr(strategy.structured_config, 'memory_enabled'):
+                if strategy.structured_config.summarize_memory and strategy.structured_config.memory_enabled:
+                    try:
+                        # Generate a summary of the episodic memory
+                        memory_entries = [f"Step {e.step}: {e.type} - {str(e.content)}" for e in state.episodic_memory]
+                        memory_text = "\n".join(memory_entries)
+                        
+                        # Create a prompt for summarization
+                        summary_prompt = f"""Please summarize the following reasoning steps:
 
 {memory_text}
 
 Provide a concise summary of the reasoning process, key insights, and conclusions."""
+                        
+                        # Request a summary from the model
+                        response, _ = await model.request(
+                            message_history=[{
+                                "role": "user",
+                                "content": summary_prompt
+                            }],
+                            model_request_parameters={
+                                "temperature": 0.3,
+                                "max_tokens": 500
+                            }
+                        )
+                        
+                        # Extract the summary
+                        summary = ""
+                        if hasattr(response, 'parts'):
+                            text_parts = [p for p in response.parts if isinstance(p, TextPart)]
+                            if text_parts:
+                                summary = text_parts[0].content
+                        elif hasattr(response, 'data'):
+                            summary = str(response.data)
+                        
+                        # Add the summary to the final message
+                        if summary:
+                            final_message = state.final_message or ""
+                            state.final_message = f"{final_message}\n\nSummary of reasoning:\n{summary}"
                     
-                    # Request a summary from the model
-                    response, _ = await model.request(
-                        messages=[{
-                            "role": "user",
-                            "content": summary_prompt
-                        }],
-                        model_request_parameters={
-                            "temperature": 0.3,
-                            "max_tokens": 500
-                        }
-                    )
-                    
-                    # Extract the summary
-                    summary = ""
-                    if hasattr(response, 'parts'):
-                        text_parts = [p for p in response.parts if isinstance(p, TextPart)]
-                        if text_parts:
-                            summary = text_parts[0].content
-                    elif hasattr(response, 'data'):
-                        summary = str(response.data)
-                    
-                    # Add the summary to the final message
-                    if summary:
-                        final_message = state["final_message"] or ""
-                        state["final_message"] = f"{final_message}\n\nSummary of reasoning:\n{summary}"
-                
-                except Exception as e:
-                    # If summarization fails, just continue with the original message
-                    logger.error(f"Error generating memory summary: {str(e)}")
+                    except Exception as e:
+                        # If summarization fails, just continue with the original message
+                        logger.error(f"Error generating memory summary: {str(e)}")
             
             # Return the final message
-            return state["final_message"] or "Reasoning completed"
+            return state.final_message or "Reasoning completed"
             
     except Exception as e:
         # Handle errors gracefully
