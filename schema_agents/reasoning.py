@@ -23,7 +23,8 @@ from pydantic_ai.usage import Usage, UsageLimits
 from pydantic_ai.settings import ModelSettings
 from pydantic_ai.models.openai import ModelRequestParameters
 from openai import AsyncOpenAI
-
+from datetime import datetime
+from schema_agents.structured_reasoning import import_time, execute_structured_reasoning, StructuredReasoningResult
 # Configure logging
 logger = logging.getLogger("execute_simple_react")
 logger.setLevel(logging.INFO)
@@ -57,13 +58,21 @@ class SRConfig(BaseModel):
         description="Aspects to reflect on"
     )
 
+class StructuredReasoningConfig(BaseModel):
+    """Configuration for Structured Reasoning."""
+    max_steps: int = Field(10, description="Maximum reasoning steps")
+    memory_enabled: bool = Field(True, description="Whether to use episodic memory")
+    summarize_memory: bool = Field(True, description="Whether to summarize memory at the end")
+    script_timeout: int = Field(30, description="Maximum time in seconds for script execution")
+
 class ReasoningStrategy(BaseModel):
     """Container for reasoning strategy configuration."""
-    type: Union[Literal["react", "cot", "tot", "sr"], List[Literal["react", "cot", "tot", "sr"]]]
+    type: Union[Literal["react", "cot", "tot", "sr", "structured"], List[Literal["react", "cot", "tot", "sr", "structured"]]]
     react_config: Optional[ReActConfig] = None
     cot_config: Optional[CoTConfig] = None
     tot_config: Optional[ToTConfig] = None
     sr_config: Optional[SRConfig] = None
+    structured_config: Optional[StructuredReasoningConfig] = None
     verbose: bool = Field(True, description="Show reasoning steps")
     max_tokens: Optional[int] = Field(2000, description="Maximum response length")
     temperature: float = Field(0.7, description="Response creativity")
@@ -106,6 +115,53 @@ class ReasoningState:
         for entry in self.memory:
             summary += f"Step {entry['step']}: {entry['type']} - {str(entry['content'])[:100]}...\n"
         return summary
+
+@dataclasses.dataclass
+class StructuredReasoningState:
+    """State for structured reasoning execution."""
+    message_history: list[ModelMessage]
+    usage: Usage
+    retries: int
+    step_count: int = 0
+    current_plan: Optional[List[str]] = None
+    episodic_memory: List[Dict[str, Any]] = dataclasses.field(default_factory=list)
+    final_message: Optional[str] = None
+    
+    def increment_retries(self, max_result_retries: int) -> None:
+        self.retries += 1
+        if self.retries > max_result_retries:
+            raise exceptions.UnexpectedModelBehavior(
+                f'Exceeded maximum retries ({max_result_retries}) for result validation'
+            )
+    
+    def add_memory_entry(self, entry_type: str, content: Any) -> None:
+        """Add an entry to the episodic memory."""
+        self.episodic_memory.append({
+            "type": entry_type,
+            "content": content,
+            "step": self.step_count,
+            "timestamp": import_time()
+        })
+    
+    def get_memory_summary(self) -> str:
+        """Get a summary of the memory for prompt enhancement."""
+        if not self.episodic_memory:
+            return ""
+        
+        summary = "Previous steps:\n"
+        for entry in self.episodic_memory:
+            summary += f"Step {entry['step']}: {entry['type']} - {str(entry['content'])[:100]}...\n"
+        return summary
+    
+    def get_current_plan_text(self) -> str:
+        """Get the current plan as formatted text."""
+        if not self.current_plan:
+            return "No plan has been created yet."
+        
+        plan_text = "Current Plan:\n"
+        for i, step in enumerate(self.current_plan, 1):
+            plan_text += f"{i}. {step}\n"
+        return plan_text
 
 @dataclasses.dataclass
 class ReasoningDeps:
@@ -654,7 +710,13 @@ async def execute_react_reasoning(
     stream: bool = False
 ) -> Any:
     """Execute ReAct reasoning strategy, choosing between sync and stream implementations."""
+    # Check if we should use structured reasoning
+    if strategy.type == "structured":
+        return await execute_structured_reasoning(prompt, model, tools, strategy, run_context, stream)
+    
+    # Otherwise use ReAct reasoning
     if stream:
         return execute_react_reasoning_stream(prompt, model, tools, strategy, run_context)
     else:
         return await execute_react_reasoning_sync(prompt, model, tools, strategy, run_context)
+

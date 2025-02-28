@@ -18,7 +18,7 @@ from pydantic_ai.tools import ToolPrepareFunc, AgentDepsT, Tool, ToolFuncEither,
 from pydantic.fields import PydanticUndefined
 from pydantic_ai.messages import ModelResponse, TextPart
 from schema_agents.reasoning import ReasoningStrategy, ReasoningDeps
-from schema_agents.reasoning import execute_react_reasoning
+from schema_agents.reasoning import execute_react_reasoning, execute_structured_reasoning
 
 ResultDataT = TypeVar('ResultDataT')
 RunResultDataT = TypeVar('RunResultDataT')
@@ -180,7 +180,30 @@ class Agent(PydanticAgent[AgentDepsT, ResultDataT]):
                             strategy,
                             run_context
                         )
-                    # Add other strategy types here
+                    elif strategy_type == "structured":
+                        if not strategy.structured_config:
+                            raise ValueError("Structured reasoning strategy selected but no structured_config provided")
+                        
+                        # Create reasoning deps with usage limits
+                        reasoning_deps = ReasoningDeps(
+                            user_deps=deps,
+                            prompt=user_prompt,
+                            model=model_used,
+                            tools=list(agent_copy._function_tools.values()),
+                            strategy=strategy,
+                            run_context=run_context,
+                            function_tools=agent_copy._function_tools,
+                            usage_limits=model_used.usage_limits if hasattr(model_used, 'usage_limits') else None
+                        )
+                        
+                        # Execute structured reasoning
+                        final_answer = await execute_structured_reasoning(
+                            user_prompt,
+                            model_used,
+                            list(agent_copy._function_tools.values()),
+                            strategy,
+                            run_context
+                        )
                     else:
                         raise ValueError(f"Unknown strategy type: {strategy_type}")
 
@@ -587,6 +610,50 @@ class Agent(PydanticAgent[AgentDepsT, ResultDataT]):
                         
                         # Start the ReAct reasoning with streaming
                         stream = await execute_react_reasoning(
+                            user_prompt,
+                            model_used,
+                            list(agent_copy._function_tools.values()),
+                            strategy,
+                            run_context,
+                            stream=True
+                        )
+                        
+                        # Create a ModelResponse for streaming
+                        async def stream_generator():
+                            async for chunk in stream:
+                                # Update the streamed result with the new chunk
+                                streamed_result.data = chunk
+                                if isinstance(chunk, ModelResponse):
+                                    yield chunk
+                                else:
+                                    yield ModelResponse(parts=[TextPart(content=str(chunk))], model_name=model_used.model_name)
+                        
+                        # Create a StreamedResponse and assign the generator
+                        streamed_result._stream_response = stream_generator()
+                        yield streamed_result
+                        
+                        # Consume the stream to ensure it completes
+                        async for _ in streamed_result._stream_response:
+                            pass
+                    elif strategy_type == "structured":
+                        if not strategy.structured_config:
+                            raise ValueError("Structured reasoning strategy selected but no structured_config provided")
+                        
+                        # Create a StreamedRunResult for the Structured reasoning
+                        streamed_result = result.StreamedRunResult(
+                            message_history or [],
+                            len(message_history) if message_history else 0,
+                            None,  # No usage limits for now
+                            None,  # No result stream yet
+                            None,  # No result schema
+                            run_context,
+                            [],  # No result validators
+                            None,  # No tool name
+                            None,  # No on_complete callback
+                        )
+                        
+                        # Start the Structured reasoning with streaming
+                        stream = await execute_structured_reasoning(
                             user_prompt,
                             model_used,
                             list(agent_copy._function_tools.values()),
