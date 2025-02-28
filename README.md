@@ -257,7 +257,7 @@ from pydantic import Field
 
 # Create a basic agent
 agent = Agent(
-    model="openai:gpt-4",
+    model="openai:gpt-4o-mini",
     name="Helper",
     role="General Assistant",
     goal="Help users with their tasks",
@@ -316,7 +316,7 @@ from schema_agents import ReasoningStrategy, ReActConfig
 
 # Create an agent with ReAct reasoning
 agent = Agent(
-    model="openai:gpt-4",
+    model="openai:gpt-4o-mini",
     name="Analyst",
     role="Data Analyst",
     goal="Analyze data and provide insights",

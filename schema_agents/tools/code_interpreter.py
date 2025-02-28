@@ -1,10 +1,9 @@
 import os
-# from simpleaichat import AIChat
 import re
 import inspect
-# To remove jupyter warning.
 os.environ["JUPYTER_PLATFORM_DIRS"] = "1"
 from jupyter_client.manager import start_new_kernel
+from jupyter_client.kernelspec import KernelSpecManager, NoSuchKernel
 from jupyter_client.utils import run_sync
 from .msgspec_v5 import validate_message
 import os
@@ -14,7 +13,8 @@ import base64
 import json
 import logging
 
-logging.basicConfig(level=logging.WARNING)
+# Set logging level to INFO for more detailed output
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 def strip_ansi_codes(s):
@@ -88,30 +88,104 @@ def extract_display_data(results):
     output = results["outputs"]
     return "\n".join([item['display_data'] for item in output if 'display_data' in item])
 
+def get_available_kernels():
+    """Get a list of available Jupyter kernels."""
+    try:
+        kernel_spec_manager = KernelSpecManager()
+        kernel_specs = kernel_spec_manager.find_kernel_specs()
+        logger.info(f"Found kernel specs: {kernel_specs}")
+        return list(kernel_specs.keys())
+    except Exception as e:
+        logger.error(f"Error getting available kernels: {str(e)}")
+        return []
+
+def find_python_kernel():
+    """Find a suitable Python kernel from available kernels."""
+    available_kernels = get_available_kernels()
+    logger.info(f"Available kernels in find_python_kernel: {available_kernels}")
+    
+    if not available_kernels:
+        logger.warning("No available kernels found")
+        return None
+    
+    # Define priority order for kernel selection
+    priority_kernels = [
+        "python3",  # Standard Python 3 kernel
+        "python",   # Generic Python kernel
+        "jupyterlab", # JupyterLab kernel
+        "ipykernel", # IPython kernel
+    ]
+    
+    # First try to find kernels from our priority list
+    for kernel in priority_kernels:
+        if kernel in available_kernels:
+            logger.info(f"Found priority kernel: {kernel}")
+            return kernel
+    
+    # If none of the priority kernels are available, look for any kernel with 'python' in the name
+    python_kernels = [k for k in available_kernels if 'python' in k.lower()]
+    if python_kernels:
+        logger.info(f"Found Python kernel: {python_kernels[0]}")
+        return python_kernels[0]
+    
+    # If no Python kernels found, return the first available kernel
+    if available_kernels:
+        logger.info(f"Using first available kernel: {available_kernels[0]}")
+        return available_kernels[0]
+    
+    logger.warning("No kernels found after all attempts")
+    return None
+
 class CodeInterpreter:
     MAIN_SESSION_ID = "main"
 
-    def __init__(self, bot=None, session_id=None, work_dir_root="./.code-interpreter"):
+    def __init__(self, session_id=None, work_dir_root="./.code-interpreter", kernel_name=None):
         self.store = {}
         self._last_output = ""
         self.session_id = shortuuid.uuid() if session_id is None else session_id
         self.work_dir = os.path.join(work_dir_root, self.session_id)
+        self.kernel_name = kernel_name
+        logger.info(f"CodeInterpreter initialized with kernel_name: {kernel_name}")
         assert os.path.exists(work_dir_root), f"work_dir_root {work_dir_root} does not exist"
         os.makedirs(self.work_dir, exist_ok=True)
-        self.bot = bot
         self.initialize()
 
     def initialize(self):
-        self.km, self.kc = start_new_kernel(kernel_name="python")
+        # If no kernel name is specified, try to find a suitable one
+        if not self.kernel_name:
+            logger.info("No kernel name specified, finding a suitable one")
+            self.kernel_name = find_python_kernel()
+            if not self.kernel_name:
+                logger.error("No suitable Jupyter kernel found")
+                raise RuntimeError("No suitable Jupyter kernel found. Please install a Python kernel or specify a kernel name.")
+        
+        try:
+            logger.info(f"Starting kernel: {self.kernel_name}")
+            self.km, self.kc = start_new_kernel(kernel_name=self.kernel_name)
+            logger.info("Kernel started successfully")
+        except NoSuchKernel as e:
+            logger.error(f"Kernel not found: {self.kernel_name}, error: {str(e)}")
+            available_kernels = get_available_kernels()
+            if available_kernels:
+                # If the specified kernel is not available, try to use an available one
+                self.kernel_name = find_python_kernel()
+                logger.warning(f"Specified kernel not found. Using {self.kernel_name} instead.")
+                self.km, self.kc = start_new_kernel(kernel_name=self.kernel_name)
+            else:
+                logger.error("No Jupyter kernels available")
+                raise RuntimeError(f"No Jupyter kernels available. Please install at least one kernel.")
+        except Exception as e:
+            logger.error(f"Error starting kernel: {str(e)}")
+            raise
+        
         results = self.execute_code(INIT_CODE.format(work_dir=self.work_dir) + KERNEL_INFO_CODE)
-        assert results['status'] == "ok", f"failed to get kernel info, output: {results}"
+        assert results['status'] == "ok", f"Failed to get kernel info, output: {results}"
         kernel_info = extract_stdout(results).replace('\n', ' ')
         self.system_prompt = SYSTEM_PROMPT.format(work_dir=self.work_dir, kernel_info=kernel_info)
 
     def reset(self):
         self.tearDown()
         self.initialize()
-        # self.bot.reset_session()
 
     def tearDown(self):
         # Check if the kernel client and kernel manager exist
@@ -241,121 +315,12 @@ class CodeInterpreter:
     def get_store(self, key):
         return self.store[key]
 
-    def fork_session(self, session_id):
-        sess = self.bot.get_session(self.MAIN_SESSION_ID)
-        sess_dict = sess.model_dump(
-            exclude={"auth", "api_url", "input_fields"},
-            exclude_none=True,
-        )
-        sess_dict["id"] = session_id
-        self.bot.new_session(**sess_dict)
-        last_message_idx = len(sess.messages) - 1
-        return last_message_idx 
-    
-    def merge_session(self, target_session_id, messages, last_output):
-        sess = self.bot.get_session(target_session_id)
-        sess.messages.extend(messages)
-        # save the last output so we can prepend it to the next user message
-        self._last_output = f"Jupyter: {last_output}\n"
-        
-    def save_session(self, path):
-        # TODO: save the last output
-        self.bot.save_session(path)
-
     def _create_summary(self, result):
         """
         Create a text summary to describe the execution result.
         """
         return json.dumps({k: result[k] for k in result.keys() if result[k]}, indent=1)
 
-    def execute_query(self, query: str) -> str:
-        """Generate python code based on a input query string and execute it in a jupyter kernel. The output of the execution containing `stdout`, `stderr`, `display_data` will be returned as a string"""
-        logger.info("Executing query: %s", query)
-        self.fork_session("dev")
-        response = self.bot(f"{self._last_output}User: {query}", id="dev")
-        query_message = self.bot.get_session("dev").messages[-2]
-        max_iteration = 5
-        while True:
-            logger.info("Executing python code:\n---\n%s\n---\n", response)
-            try:
-                command = "\n".join(extract_code_blocks(response))
-                if not command:
-                    return response
-                assert command, "no python code is generated (Note: remember to quote it as a markdown code block)"
-                exec_result = self.execute_code(command)
-                
-                if exec_result["status"] == "ok":
-                    exec_result["status"] = "successfully executed"
-                    exec_result["code"] = command
-                    output = self._create_summary(exec_result)
-                    response_message = self.bot.get_session("dev").messages[-1]
-                    # format the response message
-                    response_message.content = f"```python\n{command}```\n{output}"
-                    # merge the two correct messages into the main session
-                    self.merge_session(self.MAIN_SESSION_ID, [query_message, response_message], output)
-                    output = f"Jupyter: {output}"
-                    break
-                else:
-                    exec_result["status"] = "failed to execute the code."
-                    output = self._create_summary(exec_result)
-                    output = f"Jupyter: {output}"
-                    raise RuntimeError(output)
-            except RuntimeError:
-                max_iteration -= 1
-                # output = traceback.format_exc()
-                logger.info("RuntimeError: %s", output)
-                if max_iteration <= 0:
-                    break
-                response = self.bot(ERROR_FIX_PROMPT.format(error=output), id="dev")
-        if max_iteration <= 0 and output.startswith("Error:"):
-            output += f"After trying {max_iteration} times, the tool still failed to produce code for the task."
-            logger.error(output)
-        return output
-
-def create_mock_client(work_dir_root = "./.data", form_data=None):
-    os.makedirs(work_dir_root, exist_ok=True)
-    ex = CodeInterpreter(work_dir_root=work_dir_root)
-    
-    if not form_data:
-        form_data = {}
-    
-    class MockDialog():
-        def __init__(self, response) -> None:
-            self.response = response
-
-        async def get_data(self):
-            return self.response
-    class MockClient():
-        def __init__(self) -> None:
-            self.system_prompt =  ex.system_prompt
-
-        async def newMessage(self, data):
-            print(data)
-
-        async def initialize(self, data):
-            pass
-        
-        async def showMessage(self, message):
-            print(message)
-        
-        async def appendText(self, data):
-            print(data)
-
-        async def executeScript(self, data):
-            script = data['script']
-            del data['script']
-            return ex.execute_code(script, **data)
-
-        async def showDialog(self, src, config=None, data=None):
-            print(src, config, data)
-            return MockDialog({"formData": form_data})
-
-        async def createWindow(self, src, config=None, data=None):
-            print(src, config, data)
-            return MockDialog({})
-
-    return MockClient()
-    
 if __name__ == "__main__":
     work_dir_root = "./.data"
     os.makedirs(work_dir_root, exist_ok=True)

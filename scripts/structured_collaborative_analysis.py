@@ -1,13 +1,16 @@
 """
-Simplified Collaborative Data Analysis System using Schema Agents with ReAct Reasoning
+Collaborative Data Analysis System using Schema Agents with Structured Reasoning (Local Version)
 
-This example demonstrates a multi-agent system for collaborative data analysis using ReAct reasoning:
+This example demonstrates a multi-agent system for collaborative data analysis using structured reasoning:
 1. DataPreprocessor Agent: Handles data loading and preprocessing
 2. Analyzer Agent: Performs statistical analysis and visualization
+3. Reporter Agent: Generates reports and insights
 
 Features demonstrated:
+- Local agent execution
+- Streaming responses
 - Schema-based tools
-- ReAct reasoning strategy
+- Structured reasoning strategy
 - Structured outputs
 """
 
@@ -22,8 +25,9 @@ from dataclasses import dataclass
 from pydantic import BaseModel, Field
 from pydantic_ai import RunContext, models
 from pydantic_ai.models.openai import OpenAIModel
+from pydantic_ai.usage import Usage
 from schema_agents import Agent
-from schema_agents.reasoning import ReasoningStrategy, ReActConfig
+from schema_agents.reasoning import ReasoningStrategy, StructuredReasoningConfig
 import logging
 
 # Configure logging
@@ -65,12 +69,21 @@ class AnalysisResult(BaseModel):
     plots: List[str] = Field(default_factory=list, description="Base64 encoded plot images")
     correlations: Optional[Dict[str, Dict[str, float]]] = Field(None, description="Correlation analysis results")
 
+class Report(BaseModel):
+    """Final analysis report"""
+    title: str = Field(..., description="Report title")
+    summary: str = Field(..., description="Executive summary")
+    sections: List[Dict[str, str]] = Field(..., description="Report sections")
+    recommendations: List[str] = Field(..., description="Recommendations")
+    timestamp: str = Field(..., description="Report generation timestamp")
+
 @dataclass
 class AgentDeps:
     """Shared dependencies for all agents"""
     data: Optional[pd.DataFrame] = None
     stats: Optional[DataStats] = None
     analysis: Optional[AnalysisResult] = None
+    report: Optional[Report] = None
     history: List[str] = None
     memory: List[str] = None
     
@@ -95,11 +108,12 @@ def create_preprocessor_agent(model: models.Model) -> Agent:
         goal="Prepare and validate data for analysis",
         backstory="You are an expert in data preprocessing with years of experience in handling various data formats and quality issues.",
         reasoning_strategy=ReasoningStrategy(
-            type="react",
-            react_config=ReActConfig(
-                max_iterations=5,
+            type="structured",
+            structured_config=StructuredReasoningConfig(
+                max_steps=5,
                 memory_enabled=True,
-                summarize_memory=True
+                summarize_memory=True,
+                script_timeout=30
             )
         )
     )
@@ -185,11 +199,12 @@ def create_analyzer_agent(model: models.Model) -> Agent:
         goal="Perform in-depth statistical analysis and create visualizations",
         backstory="You are a skilled data analyst with expertise in statistical analysis and data visualization.",
         reasoning_strategy=ReasoningStrategy(
-            type="react",
-            react_config=ReActConfig(
-                max_iterations=5,
+            type="structured",
+            structured_config=StructuredReasoningConfig(
+                max_steps=5,
                 memory_enabled=True,
-                summarize_memory=True
+                summarize_memory=True,
+                script_timeout=30
             )
         )
     )
@@ -290,6 +305,90 @@ def create_analyzer_agent(model: models.Model) -> Agent:
     logger.info(f"Available tools: {[tool.name for tool in agent._function_tools.values()]}")
     return agent
 
+# Create the Reporter Agent
+def create_reporter_agent(model: models.Model) -> Agent:
+    agent = Agent(
+        model=model,
+        name="Reporter",
+        deps_type=AgentDeps,
+        result_type=Report,
+        role="Technical Writer",
+        goal="Generate comprehensive analysis reports",
+        backstory="You are an experienced technical writer specializing in data analysis reports.",
+        reasoning_strategy=ReasoningStrategy(
+            type="structured",
+            structured_config=StructuredReasoningConfig(
+                max_steps=5,
+                memory_enabled=True,
+                summarize_memory=True,
+                script_timeout=30
+            )
+        )
+    )
+    
+    @agent.tool
+    async def generate_report(
+        ctx: RunContext[AgentDeps],
+        title: str,
+        analysis_results: AnalysisResult
+    ) -> Report:
+        """Generate a structured report from analysis results"""
+        logger.info("Generating analysis report")
+        
+        if ctx.deps.stats is None:
+            raise ValueError("No statistics available")
+        
+        # Create report sections
+        sections = [
+            {"Overview": f"Analysis of dataset with {ctx.deps.stats.shape[0]} records and {ctx.deps.stats.shape[1]} features"},
+            {"Methodology": "Statistical analysis and visualization were performed using Python's data science stack"},
+            {"Findings": "\n".join(analysis_results.findings)},
+            {"Visualizations": f"Generated {len(analysis_results.plots)} visualizations"}
+        ]
+        
+        # Add correlation section if available
+        if analysis_results.correlations:
+            # Format correlations as text
+            correlation_text = "Strong correlations found between features:\n"
+            for pair, data in analysis_results.correlations.items():
+                if isinstance(data, dict) and "value" in data:
+                    correlation_text += f"- {pair}: {data['value']}\n"
+                else:
+                    correlation_text += f"- {pair}: {data}\n"
+            
+            sections.append({
+                "Correlations": correlation_text
+            })
+        
+        report = Report(
+            title=title,
+            summary=analysis_results.description,
+            sections=sections,
+            recommendations=[
+                "Continue monitoring key metrics",
+                "Investigate correlations further",
+                "Consider collecting additional data"
+            ],
+            timestamp=datetime.now().isoformat()
+        )
+        
+        ctx.deps.report = report
+        return report
+    
+    return agent
+
+async def process_streaming_result(result, prefix=""):
+    """Process a streaming result and print each chunk with a prefix."""
+    if hasattr(result, '__aiter__'):
+        # If it's an async iterator, iterate through it
+        async for chunk in result:
+            print(f"{prefix}: {chunk}")
+        print(f"{prefix} completed.")
+    else:
+        # If it's a final result, just print it
+        print(f"{prefix}: {result.data}")
+        print(f"{prefix} completed.")
+
 async def main():
     try:
         # Create OpenAI model instance
@@ -303,11 +402,15 @@ async def main():
         # Initialize shared dependencies
         deps = AgentDeps()
         
-        # Create agents
+        # Create agents with Structured reasoning
         print("Creating agents...")
         preprocessor = create_preprocessor_agent(model)
         analyzer = create_analyzer_agent(model)
+        reporter = create_reporter_agent(model)
         print("All agents created successfully")
+        
+        # Start analysis workflow
+        logger.info("Starting analysis workflow with structured reasoning...")
         
         # Load and preprocess data
         logger.info("Loading and preprocessing data...")
@@ -319,36 +422,50 @@ async def main():
             3. Check for missing values and clean if necessary
             4. Return the computed statistics
             """,
-            deps=deps
+            deps=deps,
+            stream=False  # Set to False for now until we fix streaming
         )
         
-        # Print the result
-        print(f"Preprocessing result: {preprocess_result.data}")
+        # Process the result
+        await process_streaming_result(preprocess_result, "Preprocessing")
         
         # Perform analysis
         logger.info("Performing analysis...")
         analysis_result = await analyzer.run(
-            f"""
-            Please analyze the iris dataset using the exact column names:
-            - 'sepal length (cm)'
-            - 'sepal width (cm)'
-            - 'petal length (cm)'
-            - 'petal width (cm)'
-            - 'species'
-            
-            1. Create scatter plots for 'sepal length (cm)' vs 'sepal width (cm)' and 'petal length (cm)' vs 'petal width (cm)'
-            2. Create histograms for each numeric feature
+            """
+            Please analyze the iris dataset:
+            1. Create scatter plots for sepal and petal dimensions
+            2. Create histograms for each feature
             3. Perform correlation analysis between all numeric columns
             4. Identify key patterns and insights
             5. Return the analysis results
             """,
-            deps=deps
+            deps=deps,
+            stream=False  # Set to False for now until we fix streaming
         )
         
-        # Print the result
-        print(f"Analysis result: {analysis_result.data}")
+        # Process the result
+        await process_streaming_result(analysis_result, "Analysis")
         
-        logger.info("Analysis workflow completed successfully!")
+        # Generate report
+        logger.info("Generating final report...")
+        report_result = await reporter.run(
+            """
+            Please generate a comprehensive report about the Iris dataset analysis:
+            1. Include the dataset statistics from the preprocessing step
+            2. Add the plot paths from the analysis step
+            3. Include the correlation analysis results
+            4. Provide insights and recommendations based on the analysis
+            5. Format the report in a clear, structured way
+            """,
+            deps=deps,
+            stream=False  # Set to False for now until we fix streaming
+        )
+        
+        # Process the result
+        await process_streaming_result(report_result, "Report")
+        
+        logger.info("Structured analysis workflow completed successfully!")
         
     except Exception as e:
         logger.error(f"Error in main: {str(e)}", exc_info=True)

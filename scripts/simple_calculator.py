@@ -49,6 +49,11 @@ class MemoryState(BaseModel):
     """Calculator memory state"""
     stored_value: Optional[float] = Field(None, description="Value stored in memory")
     history: List[CalculationResult] = Field(default_factory=list, description="Calculation history")
+    
+    async def add_to_history(self, prompt: str) -> None:
+        """Add a prompt to history - required by the Agent framework"""
+        # This method is required by the Agent framework
+        pass
 
 class UnitConversion(BaseModel):
     """Unit conversion result"""
@@ -76,32 +81,36 @@ def create_calculator_agent(model: models.Model) -> Agent:
         )
     )
     
-    @agent.schema_tool
+    @agent.schema_tool(takes_ctx=True)
     async def calculate(
         ctx: RunContext[MemoryState],
-        x: float = Field(..., description="First number"),
-        y: float = Field(..., description="Second number"),
+        x: int = Field(..., description="First number"),
+        y: int = Field(..., description="Second number"),
         operation: str = Field(..., description="Operation to perform (add/subtract/multiply/divide)")
     ) -> CalculationResult:
         """Perform a basic arithmetic calculation"""
+        # Convert to float for calculations
+        x_float = float(x)
+        y_float = float(y)
+        
         result = None
         if operation == "add":
-            result = x + y
+            result = x_float + y_float
         elif operation == "subtract":
-            result = x - y
+            result = x_float - y_float
         elif operation == "multiply":
-            result = x * y
+            result = x_float * y_float
         elif operation == "divide":
-            if y == 0:
+            if y_float == 0:
                 raise ValueError("Cannot divide by zero")
-            result = x / y
+            result = x_float / y_float
         else:
             raise ValueError(f"Unknown operation: {operation}")
             
         calc_result = CalculationResult(
             operation=operation,
             result=result,
-            expression=f"{x} {operation} {y}"
+            expression=f"{x_float} {operation} {y_float}"
         )
         
         # Add to history
@@ -111,16 +120,17 @@ def create_calculator_agent(model: models.Model) -> Agent:
         
         return calc_result
 
-    @agent.schema_tool
+    @agent.schema_tool(takes_ctx=True)
     async def store_memory(
         ctx: RunContext[MemoryState],
-        value: float = Field(..., description="Value to store in memory")
+        value: int = Field(..., description="Value to store in memory")
     ) -> str:
         """Store a value in calculator memory"""
-        ctx.deps.stored_value = value
+        # Convert to float for storage
+        ctx.deps.stored_value = float(value)
         return f"Stored {value} in memory"
 
-    @agent.schema_tool
+    @agent.schema_tool(takes_ctx=True)
     async def recall_memory(
         ctx: RunContext[MemoryState]
     ) -> float:
@@ -129,14 +139,17 @@ def create_calculator_agent(model: models.Model) -> Agent:
             raise ValueError("No value stored in memory")
         return ctx.deps.stored_value
 
-    @agent.schema_tool
+    @agent.schema_tool(takes_ctx=True)
     async def convert_units(
         ctx: RunContext[MemoryState],
-        value: float = Field(..., description="Value to convert"),
+        value: int = Field(..., description="Value to convert"),
         from_unit: str = Field(..., description="Original unit (m/cm/km/in/ft)"),
         to_unit: str = Field(..., description="Target unit (m/cm/km/in/ft)")
     ) -> UnitConversion:
         """Convert between different units of length"""
+        # Convert to float for calculations
+        value_float = float(value)
+        
         # Conversion factors to meters
         to_meters = {
             "m": 1,
@@ -150,18 +163,18 @@ def create_calculator_agent(model: models.Model) -> Agent:
             raise ValueError(f"Unsupported units. Supported units: {list(to_meters.keys())}")
             
         # Convert to meters first
-        meters = value * to_meters[from_unit]
+        meters = value_float * to_meters[from_unit]
         # Then convert to target unit
         result = meters / to_meters[to_unit]
         
         return UnitConversion(
             from_unit=from_unit,
             to_unit=to_unit,
-            value=value,
+            value=value_float,
             result=result
         )
 
-    @agent.schema_tool
+    @agent.schema_tool(takes_ctx=True)
     async def get_history(
         ctx: RunContext[MemoryState],
         last_n: Optional[int] = Field(None, description="Number of last entries to return")
@@ -180,7 +193,7 @@ async def main():
         # Create OpenAI model instance
         logger.info("Creating OpenAI model instance...")
         model = OpenAIModel(
-            'gpt-4',
+            'gpt-4o-mini',
             api_key=os.getenv('OPENAI_API_KEY')
         )
         

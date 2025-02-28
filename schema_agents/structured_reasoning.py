@@ -9,6 +9,7 @@ import json
 import logging
 import re
 import sys
+import os
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Literal, Optional, Union, AsyncIterator, Set, Type, Callable, TypeVar, cast
 from pydantic import BaseModel, Field
@@ -24,6 +25,9 @@ from pydantic_ai.settings import ModelSettings
 from pydantic_ai.models.openai import ModelRequestParameters
 from openai import AsyncOpenAI
 from datetime import datetime
+
+# Import CodeInterpreter
+from .tools.code_interpreter import CodeInterpreter, extract_stdout, extract_stderr, extract_error
 
 # Configure logging
 logger = logging.getLogger("structured_reasoning")
@@ -89,6 +93,34 @@ class StructuredReasoningState(BaseModel):
         for i, step in enumerate(self.current_plan, 1):
             plan_text += f"{i}. {step}\n"
         return plan_text
+
+# Global variable to store the CodeInterpreter instance
+_code_interpreter_instance = None
+
+def get_code_interpreter(work_dir_root="./.code-interpreter", reset=False):
+    """Get or create a CodeInterpreter instance.
+    
+    Args:
+        work_dir_root: The root directory for code interpreter workspace
+        reset: Whether to reset the interpreter if it already exists
+        
+    Returns:
+        A CodeInterpreter instance
+    """
+    global _code_interpreter_instance
+    
+    # Create the work directory if it doesn't exist
+    os.makedirs(work_dir_root, exist_ok=True)
+    
+    # Create a new instance if needed
+    if _code_interpreter_instance is None:
+        logger.info(f"Creating new CodeInterpreter instance with work_dir_root: {work_dir_root}")
+        _code_interpreter_instance = CodeInterpreter(work_dir_root=work_dir_root)
+    elif reset:
+        logger.info("Resetting CodeInterpreter instance")
+        _code_interpreter_instance.reset()
+    
+    return _code_interpreter_instance
 
 async def execute_structured_reasoning(
     prompt: str,
@@ -285,37 +317,23 @@ Always format your response as a JSON object with the following structure:
                         chunks.append(f"Executing script...\n")
                         
                         try:
-                            # Create a temporary file for the script
-                            import tempfile
-                            import os
-                            import asyncio
-                            import sys
+                            # Get the code interpreter
+                            code_interpreter = get_code_interpreter()
                             
-                            # Create a temporary file
-                            with tempfile.NamedTemporaryFile(suffix='.py', delete=False, mode='w') as f:
-                                f.write(structured_result.action)
-                                script_path = f.name
-                            
-                            # Execute the script with timeout
+                            # Execute the code with timeout
                             timeout = strategy.structured_config.script_timeout
                             
                             try:
-                                # Prepare the command
-                                cmd = [sys.executable, script_path]
-                                
-                                # Create subprocess
-                                proc = await asyncio.create_subprocess_exec(
-                                    *cmd,
-                                    stdout=asyncio.subprocess.PIPE,
-                                    stderr=asyncio.subprocess.PIPE
+                                # Execute the code
+                                results = code_interpreter.execute_code(
+                                    structured_result.action,
+                                    timeout=timeout
                                 )
                                 
-                                # Wait for the process with timeout
-                                stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-                                
-                                # Decode the output
-                                stdout_str = stdout.decode('utf-8')
-                                stderr_str = stderr.decode('utf-8')
+                                # Extract the output
+                                stdout_str = extract_stdout(results)
+                                stderr_str = extract_stderr(results)
+                                error_str = extract_error(results)
                                 
                                 # Prepare the result
                                 script_result = f"Script execution result:\n"
@@ -323,19 +341,17 @@ Always format your response as a JSON object with the following structure:
                                     script_result += f"Output:\n{stdout_str}\n"
                                 if stderr_str:
                                     script_result += f"Errors:\n{stderr_str}\n"
+                                if error_str:
+                                    script_result += f"Errors:\n{error_str}\n"
                                 
-                                # Clean up the temporary file
-                                os.unlink(script_path)
-                            except asyncio.TimeoutError:
-                                # Kill the process if it times out
-                                if 'proc' in locals():
-                                    proc.kill()
-                                
-                                # Clean up the temporary file
-                                os.unlink(script_path)
-                                
-                                # Set the timeout error
-                                script_result = f"Script execution timed out after {timeout} seconds"
+                                # Check execution status
+                                if results["status"] != "ok":
+                                    script_result += f"Execution failed with status: {results['status']}\n"
+                                    if results.get("traceback"):
+                                        script_result += f"Traceback:\n{results['traceback']}\n"
+                            except Exception as e:
+                                # Handle timeout or other errors
+                                script_result = f"Script execution error: {str(e)}"
                             
                             # Store the result in memory
                             state.add_memory_entry("script_result", script_result)
@@ -572,37 +588,23 @@ Provide a concise summary of the reasoning process, key insights, and conclusion
                         state.add_memory_entry("action", structured_result.action)
                         
                         try:
-                            # Create a temporary file for the script
-                            import tempfile
-                            import os
-                            import asyncio
-                            import sys
+                            # Get the code interpreter
+                            code_interpreter = get_code_interpreter()
                             
-                            # Create a temporary file
-                            with tempfile.NamedTemporaryFile(suffix='.py', delete=False, mode='w') as f:
-                                f.write(structured_result.action)
-                                script_path = f.name
-                            
-                            # Execute the script with timeout
+                            # Execute the code with timeout
                             timeout = strategy.structured_config.script_timeout
                             
                             try:
-                                # Prepare the command
-                                cmd = [sys.executable, script_path]
-                                
-                                # Create subprocess
-                                proc = await asyncio.create_subprocess_exec(
-                                    *cmd,
-                                    stdout=asyncio.subprocess.PIPE,
-                                    stderr=asyncio.subprocess.PIPE
+                                # Execute the code
+                                results = code_interpreter.execute_code(
+                                    structured_result.action,
+                                    timeout=timeout
                                 )
                                 
-                                # Wait for the process with timeout
-                                stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-                                
-                                # Decode the output
-                                stdout_str = stdout.decode('utf-8')
-                                stderr_str = stderr.decode('utf-8')
+                                # Extract the output
+                                stdout_str = extract_stdout(results)
+                                stderr_str = extract_stderr(results)
+                                error_str = extract_error(results)
                                 
                                 # Prepare the result
                                 script_result = f"Script execution result:\n"
@@ -610,19 +612,17 @@ Provide a concise summary of the reasoning process, key insights, and conclusion
                                     script_result += f"Output:\n{stdout_str}\n"
                                 if stderr_str:
                                     script_result += f"Errors:\n{stderr_str}\n"
+                                if error_str:
+                                    script_result += f"Errors:\n{error_str}\n"
                                 
-                                # Clean up the temporary file
-                                os.unlink(script_path)
-                            except asyncio.TimeoutError:
-                                # Kill the process if it times out
-                                if 'proc' in locals():
-                                    proc.kill()
-                                
-                                # Clean up the temporary file
-                                os.unlink(script_path)
-                                
-                                # Set the timeout error
-                                script_result = f"Script execution timed out after {timeout} seconds"
+                                # Check execution status
+                                if results["status"] != "ok":
+                                    script_result += f"Execution failed with status: {results['status']}\n"
+                                    if results.get("traceback"):
+                                        script_result += f"Traceback:\n{results['traceback']}\n"
+                            except Exception as e:
+                                # Handle timeout or other errors
+                                script_result = f"Script execution error: {str(e)}"
                             
                             # Store the result in memory
                             state.add_memory_entry("script_result", script_result)
@@ -714,3 +714,23 @@ Provide a concise summary of the reasoning process, key insights, and conclusion
         logger.error(error_message)
         logger.error(traceback.format_exc())
         return error_message
+    finally:
+        # Ensure we don't leak resources if we're using a temporary code interpreter
+        # We don't shut down the global instance here, as it might be reused
+        pass
+
+# Cleanup function to ensure CodeInterpreter is properly shut down
+def cleanup_code_interpreter():
+    """Clean up the CodeInterpreter instance when the module is unloaded."""
+    global _code_interpreter_instance
+    if _code_interpreter_instance is not None:
+        logger.info("Shutting down CodeInterpreter instance")
+        try:
+            _code_interpreter_instance.tearDown()
+        except Exception as e:
+            logger.error(f"Error shutting down CodeInterpreter: {str(e)}")
+        _code_interpreter_instance = None
+
+# Register the cleanup function to be called when the module is unloaded
+import atexit
+atexit.register(cleanup_code_interpreter)

@@ -456,9 +456,20 @@ class Agent(PydanticAgent[AgentDepsT, ResultDataT]):
                         param_type = next(arg for arg in args if arg is not type(None))
 
                 # Add parameter to schema
-                param_schema = {
-                    "type": param_type.__name__.lower(),
-                }
+                param_schema = {}
+
+                # Map Python types to JSON Schema types
+                if param_type is str:
+                    param_schema["type"] = "string"
+                elif param_type is int:
+                    param_schema["type"] = "integer"
+                elif param_type is float:
+                    param_schema["type"] = "number"
+                elif param_type is bool:
+                    param_schema["type"] = "boolean"
+                else:
+                    # Default fallback
+                    param_schema["type"] = param_type.__name__.lower()
 
                 # Extract Field metadata if present
                 if param.default is not Parameter.empty:
