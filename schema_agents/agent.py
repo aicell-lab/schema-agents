@@ -160,19 +160,6 @@ class Agent(PydanticAgent[AgentDepsT, ResultDataT]):
                     if strategy_type == "react":
                         if not strategy.react_config:
                             raise ValueError("ReAct strategy selected but no react_config provided")
-
-                        # Create reasoning deps with usage limits
-                        reasoning_deps = ReasoningDeps(
-                            user_deps=deps,
-                            prompt=user_prompt,
-                            model=model_used,
-                            tools=list(agent_copy._function_tools.values()),
-                            strategy=strategy,
-                            run_context=run_context,
-                            function_tools=agent_copy._function_tools,
-                            usage_limits=model_used.usage_limits if hasattr(model_used, 'usage_limits') else None
-                        )
-
                         final_answer = await execute_react_reasoning(
                             user_prompt,
                             model_used,
@@ -183,18 +170,6 @@ class Agent(PydanticAgent[AgentDepsT, ResultDataT]):
                     elif strategy_type == "structured":
                         if not strategy.structured_config:
                             raise ValueError("Structured reasoning strategy selected but no structured_config provided")
-                        
-                        # Create reasoning deps with usage limits
-                        reasoning_deps = ReasoningDeps(
-                            user_deps=deps,
-                            prompt=user_prompt,
-                            model=model_used,
-                            tools=list(agent_copy._function_tools.values()),
-                            strategy=strategy,
-                            run_context=run_context,
-                            function_tools=agent_copy._function_tools,
-                            usage_limits=model_used.usage_limits if hasattr(model_used, 'usage_limits') else None
-                        )
                         
                         # Execute structured reasoning
                         final_answer = await execute_structured_reasoning(
