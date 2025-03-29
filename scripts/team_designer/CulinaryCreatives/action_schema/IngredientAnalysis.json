@@ -1,0 +1,1 @@
+{"description": "A schema representing the analysis of ingredients, including their types and suggested culinary uses.", "properties": {"ingredients": {"description": "A structured list of ingredients with their types and suggested uses.", "items": {}, "title": "Ingredients", "type": "array"}}, "required": ["ingredients"], "title": "IngredientAnalysis", "type": "object"}
