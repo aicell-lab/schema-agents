@@ -1,0 +1,277 @@
+# coding=utf-8
+# Copyright 2024 HuggingFace Inc.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+import json
+import sys
+import unittest
+from pathlib import Path
+from typing import Dict, List, Optional, Union
+from unittest import mock
+from unittest.mock import MagicMock, patch
+
+import pytest
+from transformers.testing_utils import get_tests_dir, require_torch
+
+from schema_agents.agent_types import AgentText
+from schema_agents.models import (
+    ChatMessage,
+    HfApiModel,
+    LiteLLMModel,
+    MessageRole,
+    MLXModel,
+    OpenAIServerModel,
+    TransformersModel,
+    get_clean_message_list,
+    get_tool_json_schema,
+    parse_json_if_needed,
+    parse_tool_args_if_needed,
+)
+from schema_agents.tools import Tool, tool
+
+from .utils.markers import require_run_all
+
+
+class ModelTests(unittest.TestCase):
+    def test_get_json_schema_has_nullable_args(self):
+        @tool
+        def get_weather(location: str, celsius: Optional[bool] = False) -> str:
+            """
+            Get weather in the next days at given location.
+
+            Args:
+                location: The location to get the weather for.
+                celsius: is the temperature given in celsius?
+            """
+            return "The weather is UNGODLY with torrential rains and temperatures below -10°C"
+
+        assert get_weather.inputs["celsius"]["nullable"]
+
+    def test_chatmessage_has_model_dumps_json(self):
+        message = ChatMessage(role="user", content="Hello")
+        assert hasattr(message, "model_dump_json")
+
+    @unittest.skip(reason="MLX import error: `pip install 'schema-agents[mlx]'`")
+    def test_get_mlx_message_no_tool(self):
+        model = MLXModel(model_id="HuggingFaceTB/SmolLM2-135M-Instruct", max_tokens=10)
+        messages = [{"role": "user", "content": [{"type": "text", "text": "Hello!"}]}]
+        model(messages, stop_sequences=["great"])
+
+    @unittest.skip(reason="MLX import error: `pip install 'schema-agents[mlx]'`")
+    def test_get_mlx_message_tricky_stop_sequence(self):
+        # In this test HuggingFaceTB/SmolLM2-135M-Instruct generates the token ">'"
+        # which is required to test capturing stop_sequences that have extra chars at the end.
+        model = MLXModel(model_id="HuggingFaceTB/SmolLM2-135M-Instruct", max_tokens=100)
+        messages = [{"role": "user", "content": [{"type": "text", "text": "Hello!"}]}]
+        model(messages, stop_sequences=["great"])
+
+    @unittest.skip(reason="accelerate package not installed: `pip install 'schema-agents[transformers]'`")
+    def test_transformers_message_no_tool(self):
+        model = TransformersModel(
+            model_id="HuggingFaceTB/SmolLM2-135M-Instruct",
+            max_new_tokens=5,
+            device_map="cpu",
+            do_sample=False,
+        )
+        messages = [{"role": "user", "content": [{"type": "text", "text": "Hello!"}]}]
+        model(messages, stop_sequences=["great"])
+
+    @unittest.skip(reason="accelerate package not installed: `pip install 'schema-agents[transformers]'`")
+    def test_transformers_message_vl_no_tool(self):
+        from PIL import Image
+
+        img = Image.open(Path(get_tests_dir("fixtures")) / "000000039769.png")
+        model = TransformersModel(
+            model_id="llava-hf/llava-interleave-qwen-0.5b-hf",
+            max_new_tokens=5,
+            device_map="cpu",
+            do_sample=False,
+        )
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "What's in this image?"},
+                    {"type": "image", "image": img},
+                ],
+            }
+        ]
+        model(messages, stop_sequences=["great"])
+
+    def test_parse_tool_args_if_needed(self):
+        original_message = ChatMessage(role="user", content=[{"type": "text", "text": "Hello!"}])
+        parsed_message = parse_tool_args_if_needed(original_message)
+        assert parsed_message == original_message
+
+    def test_parse_json_if_needed(self):
+        args = "abc"
+        parsed_args = parse_json_if_needed(args)
+        assert parsed_args == "abc"
+
+        args = '{"a": 3}'
+        parsed_args = parse_json_if_needed(args)
+        assert parsed_args == {"a": 3}
+
+        args = "3"
+        parsed_args = parse_json_if_needed(args)
+        assert parsed_args == 3
+
+        args = 3
+        parsed_args = parse_json_if_needed(args)
+        assert parsed_args == 3
+
+
+class TestHfApiModel:
+    def test_call_with_custom_role_conversions(self):
+        custom_role_conversions = {MessageRole.USER: MessageRole.SYSTEM}
+        model = HfApiModel(model_id="test-model", custom_role_conversions=custom_role_conversions)
+        model.client = MagicMock()
+        messages = [{"role": "user", "content": "Test message"}]
+        _ = model(messages)
+        # Verify that the role conversion was applied
+        assert model.client.chat_completion.call_args.kwargs["messages"][0]["role"] == "system", (
+            "role conversion should be applied"
+        )
+
+    @require_run_all
+    def test_get_hfapi_message_no_tool(self):
+        model = HfApiModel(model_id="Qwen/Qwen2.5-Coder-32B-Instruct", max_tokens=10)
+        messages = [{"role": "user", "content": [{"type": "text", "text": "Hello!"}]}]
+        model(messages, stop_sequences=["great"])
+
+    @require_run_all
+    def test_get_hfapi_message_no_tool_external_provider(self):
+        model = HfApiModel(model_id="Qwen/Qwen2.5-Coder-32B-Instruct", provider="together", max_tokens=10)
+        messages = [{"role": "user", "content": [{"type": "text", "text": "Hello!"}]}]
+        model(messages, stop_sequences=["great"])
+
+
+class TestLiteLLMModel:
+    @pytest.mark.parametrize(
+        "model_id, error_flag",
+        [
+            ("groq/llama-3.3-70b", "Missing API Key"),
+            ("cerebras/llama-3.3-70b", "The api_key client option must be set"),
+            ("mistral/mistral-tiny", "The api_key client option must be set"),
+        ],
+    )
+    def test_call_different_providers_without_key(self, model_id, error_flag):
+        with patch.dict("sys.modules", {"litellm": MagicMock()}):
+            model = LiteLLMModel(model_id=model_id)
+            assert model.model_id == model_id
+
+    def test_passing_flatten_messages(self):
+        with patch.dict("sys.modules", {"litellm": MagicMock()}):
+            model = LiteLLMModel(model_id="groq/llama-3.3-70b", flatten_messages_as_text=False)
+            assert not model.flatten_messages_as_text
+
+
+class TestOpenAIServerModel:
+    def test_client_kwargs_passed_correctly(self):
+        model_id = "gpt-3.5-turbo"
+        api_base = "https://api.openai.com/v1"
+        api_key = "test_api_key"
+        organization = "test_org"
+        project = "test_project"
+        client_kwargs = {"max_retries": 5}
+
+        with patch("openai.AsyncOpenAI") as MockOpenAI:
+            _ = OpenAIServerModel(
+                model_id=model_id,
+                api_base=api_base,
+                api_key=api_key,
+                organization=organization,
+                project=project,
+                client_kwargs=client_kwargs,
+            )
+            MockOpenAI.assert_called_once_with(
+                base_url=api_base, api_key=api_key, organization=organization, project=project, max_retries=5
+            )
+
+
+def test_get_clean_message_list_basic():
+    messages = [
+        {"role": "user", "content": [{"type": "text", "text": "Hello!"}]},
+        {"role": "assistant", "content": [{"type": "text", "text": "Hi there!"}]},
+    ]
+    result = get_clean_message_list(messages)
+    assert len(result) == 2
+    assert result[0]["role"] == "user"
+    assert result[0]["content"][0]["text"] == "Hello!"
+    assert result[1]["role"] == "assistant"
+    assert result[1]["content"][0]["text"] == "Hi there!"
+
+
+def test_get_clean_message_list_role_conversions():
+    messages = [
+        {"role": "tool-call", "content": [{"type": "text", "text": "Calling tool..."}]},
+        {"role": "tool-response", "content": [{"type": "text", "text": "Tool response"}]},
+    ]
+    result = get_clean_message_list(messages, role_conversions={"tool-call": "assistant", "tool-response": "user"})
+    assert len(result) == 2
+    assert result[0]["role"] == "assistant"
+    assert result[0]["content"][0]["text"] == "Calling tool..."
+    assert result[1]["role"] == "user"
+    assert result[1]["content"][0]["text"] == "Tool response"
+
+
+@pytest.mark.parametrize(
+    "convert_images_to_image_urls, expected_clean_message",
+    [
+        (
+            False,
+            {
+                "role": "user",
+                "content": [
+                    {"type": "image", "image": "encoded_image"},
+                    {"type": "image", "image": "second_encoded_image"},
+                ],
+            },
+        ),
+        (
+            True,
+            {
+                "role": "user",
+                "content": [
+                    {"type": "image_url", "image_url": {"url": "data:image/png;base64,encoded_image"}},
+                    {"type": "image_url", "image_url": {"url": "data:image/png;base64,second_encoded_image"}},
+                ],
+            },
+        ),
+    ],
+)
+def test_get_clean_message_list_image_encoding(convert_images_to_image_urls, expected_clean_message):
+    messages = [
+        {
+            "role": "user",
+            "content": [{"type": "image", "image": b"image_data"}, {"type": "image", "image": b"second_image_data"}],
+        }
+    ]
+    with patch("schema_agents.models.encode_image_base64") as mock_encode:
+        mock_encode.side_effect = ["encoded_image", "second_encoded_image"]
+        result = get_clean_message_list(messages, convert_images_to_image_urls=convert_images_to_image_urls)
+        mock_encode.assert_any_call(b"image_data")
+        mock_encode.assert_any_call(b"second_image_data")
+        assert len(result) == 1
+        assert result[0] == expected_clean_message
+
+
+def test_get_clean_message_list_flatten_messages_as_text():
+    messages = [
+        {"role": "user", "content": [{"type": "text", "text": "Hello!"}]},
+        {"role": "user", "content": [{"type": "text", "text": "How are you?"}]},
+    ]
+    result = get_clean_message_list(messages, flatten_messages_as_text=True)
+    assert len(result) == 1
+    assert result[0]["role"] == "user"
+    assert result[0]["content"] == "Hello!How are you?"

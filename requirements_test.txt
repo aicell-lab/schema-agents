@@ -1,5 +1,0 @@
--r requirements.txt
-pytest
-pytest-asyncio
-imjoy-rpc
-matplotlib

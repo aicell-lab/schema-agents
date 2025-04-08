@@ -1,32 +1,118 @@
 [build-system]
-requires = ["setuptools", "wheel"]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
 
 [project]
-name = "schema-agents"
-version = "0.2.0.rc3"
+name = "schema_agents"
+version = "2.0.0"
+description = "🤗 schema_agents: a barebones library for agents. Agents write python code to call tools or orchestrate other agents."
+authors = [
+  { name="Aymeric Roucher", email="aymeric@hf.co" }, { name="Thomas Wolf"},
+]
 readme = "README.md"
-description = "A schema-based LLM framework for building multi-agent collaborative systems."
+requires-python = ">=3.10"
 dependencies = [
-    "numpy>=1.21.2",
-    "pydantic>=2.6.1",
-    "openai>=1.55.3",
-    "loguru",
-    "openapi-pydantic",
-    "makefun>=1.15.2",
-    "hypha-rpc>=0.20.41",
-    # "jsonschema>=4.0.1",
-    # "shortuuid>=1.0.1",
-    # "jhub-client",
-    # "aiohttp-sse-client",
-    # "jupyter-client",
-    # "faiss-cpu",
-    # "tiktoken>=0.7.0",
-    # "tenacity",
+  "huggingface-hub>=0.28.0",
+  "requests>=2.32.3",
+  "rich>=13.9.4",
+  "pandas>=2.2.3",
+  "jinja2>=3.1.4",
+  "pillow>=11.0.0",
+  "markdownify>=0.14.1",
+  "duckduckgo-search>=6.3.7",
+  "python-dotenv"
 ]
 
-[tool.setuptools]
-include-package-data = false
+[project.optional-dependencies]
+torch = [
+  "torch",
+  "torchvision",
+]
+audio = [
+  "soundfile",
+  "schema_agents[torch]",
+]
+docker = [
+  "docker>=7.1.0",
+  "websocket-client",
+]
+e2b = [
+  "e2b-code-interpreter>=1.0.3",
+  "python-dotenv>=1.0.1",
+]
+gradio = [
+  "gradio>=5.13.2",
+]
+litellm = [
+  "litellm>=1.60.2",
+]
+mcp = [
+  "mcpadapt>=0.0.15",
+  "mcp",
+]
+mlx-lm = [
+  "mlx-lm"
+]
+openai = [
+  "openai>=1.58.1"
+]
+telemetry = [
+  "arize-phoenix",
+  "opentelemetry-sdk", 
+  "opentelemetry-exporter-otlp",
+  "openinference-instrumentation-schema_agents>=0.1.4"
+]
+transformers = [
+  "accelerate",
+  "transformers>=4.0.0",
+  "schema_agents[torch]",
+]
+vision = [
+  "helium",
+  "selenium",
+]
+all = [
+  "schema_agents[audio,docker,e2b,gradio,litellm,mcp,openai,telemetry,transformers,vision]",
+]
+quality = [
+  "ruff>=0.9.0",
+]
+test = [
+  "ipython>=8.31.0", # for interactive environment tests
+  "pytest>=8.1.0",
+  "python-dotenv>=1.0.1", # For test_all_docs
+  "schema_agents[all]",
+  "rank-bm25", # For test_all_docs
+]
+dev = [
+  "schema_agents[quality,test]",
+  "sqlalchemy", # for ./examples
+]
 
-[tool.setuptools.packages.find]
-include = ["schema_agents*"]
-exclude = ["tests*", "scripts*"]
+[tool.pytest.ini_options]
+# Add the specified `OPTS` to the set of command line arguments as if they had been specified by the user.
+addopts = "-sv --durations=0"
+
+[tool.ruff]
+line-length = 119
+lint.ignore = [
+  "F403", # undefined-local-with-import-star
+  "E501", # line-too-long
+]
+lint.select = ["E", "F", "I", "W"]
+
+[tool.ruff.lint.per-file-ignores]
+"examples/*" = [
+  "E402", # module-import-not-at-top-of-file
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["schema_agents"]
+lines-after-imports = 2
+
+[tool.setuptools.package-data]
+"schema_agents.prompts" = ["*.yaml"]
+
+[project.scripts]
+smolagent = "schema_agents.cli:main"
+webagent = "schema_agents.vision_web_browser:main"
