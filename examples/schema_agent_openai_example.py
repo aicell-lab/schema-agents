@@ -6,7 +6,7 @@ from pydantic import Field
 
 # Import necessary components from schema_agents
 from schema_agents.schema_tools import schema_tool
-from schema_agents.agents import ToolCallingAgent
+from schema_agents import Agent
 from schema_agents.models import OpenAIServerModel
 
 # --- Tool Definitions ---
@@ -101,9 +101,9 @@ async def main():
     print(f"🔧 Available Tools: {[tool.name for tool in tools]}")
 
     # 4. Create the Agent
-    # The ToolCallingAgent is well-suited for executing functions based on LLM requests.
-    print("🤖 Creating ToolCallingAgent...")
-    agent = ToolCallingAgent(
+    # Using the base Agent class instead of ToolCallingAgent
+    print("🤖 Creating Agent...")
+    agent = Agent(
         model=llm,
         tools=tools,
         verbosity_level=1, # Set to 1 (or higher) to see the agent's reasoning and tool calls

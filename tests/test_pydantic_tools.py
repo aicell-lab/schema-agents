@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 
 from schema_agents.models import ChatMessage
 from schema_agents.pydantic_tools import PydanticFinalAnswerTool, create_pydantic_agent
-from schema_agents.schema_agent import Agent
+from schema_agents import Agent
 
 
 class Person(BaseModel):

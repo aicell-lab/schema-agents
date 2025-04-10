@@ -5,7 +5,7 @@ from typing import List, Optional
 from pydantic import BaseModel, Field
 
 from schema_agents.models import ChatMessage
-from schema_agents.schema_agent import Agent
+from schema_agents import Agent
 from schema_agents.schema_tools import schema_tool
 from schema_agents.tools import Tool
 
