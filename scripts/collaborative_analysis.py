@@ -129,12 +129,17 @@ def create_preprocessor_agent(model: models.Model) -> Agent:
             abs_path = os.path.abspath(file_path)
             logger.info(f"Loading data from {abs_path}")
             
-            ctx.deps.data = pd.read_csv(abs_path)
+            # Load data and clean column names
+            df = pd.read_csv(abs_path)
+            # Clean column names by removing units and spaces
+            df.columns = [col.lower().replace(' ', '_').replace('_(cm)', '') for col in df.columns]
+            
+            ctx.deps.data = df
             logger.info(f"Successfully loaded data with shape {ctx.deps.data.shape}")
-            return f"Loaded data with shape {ctx.deps.data.shape}"
+            return f"Successfully loaded data with shape {ctx.deps.data.shape}"
         except Exception as e:
             logger.error(f"Error loading file: {str(e)}")
-            return f"Error loading file: {str(e)}"
+            raise ValueError(f"Error loading file: {str(e)}")
     
     logger.info("Registered load_csv tool")
     
@@ -148,15 +153,19 @@ def create_preprocessor_agent(model: models.Model) -> Agent:
         df = ctx.deps.data
         logger.info("Computing dataset statistics")
         
-        stats = DataStats(
-            shape=df.shape,
-            columns=df.columns.tolist(),
-            summary={col: df[col].describe().to_dict() for col in df.select_dtypes(include=[np.number]).columns},
-            missing_values=df.isnull().sum().to_dict()
-        )
-        ctx.deps.stats = stats
-        logger.info("Successfully computed statistics")
-        return stats
+        try:
+            stats = DataStats(
+                shape=df.shape,
+                columns=df.columns.tolist(),
+                summary={col: df[col].describe().to_dict() for col in df.select_dtypes(include=[np.number]).columns},
+                missing_values=df.isnull().sum().to_dict()
+            )
+            ctx.deps.stats = stats
+            logger.info("Successfully computed statistics")
+            return stats
+        except Exception as e:
+            logger.error(f"Error computing statistics: {str(e)}")
+            raise ValueError(f"Error computing statistics: {str(e)}")
     
     logger.info("Registered compute_stats tool")
     
@@ -170,21 +179,25 @@ def create_preprocessor_agent(model: models.Model) -> Agent:
         df = ctx.deps.data.copy()
         logger.info(f"Cleaning data using {strategy} strategy for columns {columns}")
         
-        for col in columns:
-            if col not in df.columns:
-                logger.error(f"Column {col} not found in dataset")
-                return f"Column {col} not found in dataset"
+        try:
+            for col in columns:
+                if col not in df.columns:
+                    logger.error(f"Column {col} not found in dataset")
+                    raise ValueError(f"Column {col} not found in dataset")
+                
+                if strategy == "mean":
+                    df[col].fillna(df[col].mean(), inplace=True)
+                elif strategy == "median":
+                    df[col].fillna(df[col].median(), inplace=True)
+                elif strategy == "drop":
+                    df.dropna(subset=[col], inplace=True)
             
-            if strategy == "mean":
-                df[col].fillna(df[col].mean(), inplace=True)
-            elif strategy == "median":
-                df[col].fillna(df[col].median(), inplace=True)
-            elif strategy == "drop":
-                df.dropna(subset=[col], inplace=True)
-        
-        ctx.deps.data = df
-        logger.info("Successfully cleaned data")
-        return f"Cleaned data using {strategy} strategy for columns {columns}"
+            ctx.deps.data = df
+            logger.info("Successfully cleaned data")
+            return f"Successfully cleaned data using {strategy} strategy for columns {columns}"
+        except Exception as e:
+            logger.error(f"Error cleaning data: {str(e)}")
+            raise ValueError(f"Error cleaning data: {str(e)}")
     
     logger.info("Registered clean_data tool")
     logger.info(f"Available tools: {[tool.name for tool in agent._function_tools.values()]}")
@@ -288,7 +301,15 @@ def create_analyzer_agent(model: models.Model) -> Agent:
                 logger.error(f"Column {col} is not numeric")
                 raise ValueError(f"Column {col} is not numeric")
         
-        corr_matrix = ctx.deps.data[columns].corr().round(3).to_dict()
+        # Create correlation matrix with proper nested dictionary structure
+        corr_matrix = {}
+        df_corr = ctx.deps.data[columns].corr().round(3)
+        for col1 in columns:
+            corr_matrix[col1] = {}
+            for col2 in columns:
+                if col1 != col2:
+                    corr_matrix[col1][col2] = float(df_corr.loc[col1, col2])
+        
         logger.info("Successfully computed correlation matrix")
         return corr_matrix
     
@@ -308,7 +329,7 @@ def create_reporter_agent(model: models.Model) -> Agent:
         reasoning_strategy=ReasoningStrategy(
             type="react",
             react_config=ReActConfig(
-                max_loops=5,
+                max_loops=10,  # Increased max loops
                 min_confidence=0.8
             )
         )
@@ -336,10 +357,11 @@ def create_reporter_agent(model: models.Model) -> Agent:
         
         # Add correlation section if available
         if analysis_results.correlations:
-            sections.append({
-                "Correlations": "Strong correlations found between features:\n" + 
-                "\n".join([f"- {k}: {v}" for k, v in analysis_results.correlations.items()])
-            })
+            correlation_text = "Strong correlations found between features:\n"
+            for var1, corrs in analysis_results.correlations.items():
+                for var2, corr_value in corrs.items():
+                    correlation_text += f"- {var1} vs {var2}: {corr_value:.3f}\n"
+            sections.append({"Correlations": correlation_text})
         
         report = Report(
             title=title,
@@ -423,7 +445,7 @@ async def main():
         # Create OpenAI model instance
         print("Creating OpenAI model instance...")
         model = OpenAIModel(
-            'gpt-4o-mini',
+            'gpt-4',  # Using gpt-4 for better performance
             api_key=os.getenv('OPENAI_API_KEY')
         )
         print("OpenAI model instance created")
@@ -460,41 +482,45 @@ async def main():
         preprocess_result = await preprocessor.run(
             """
             Please follow these steps:
-            1. Use the load_csv tool to load the iris dataset from data/iris.csv
-            2. After loading, use compute_stats to calculate statistics on the loaded data
+            1. Load the iris dataset from data/iris.csv using the load_csv tool
+            2. Compute statistics on the loaded data using compute_stats
             3. Return the computed statistics
             """,
             deps=deps
         )
-        logger.info(f"Preprocessing complete: {preprocess_result.data}")
+        logger.info(f"Preprocessing complete: {preprocess_result}")
         
-        # Perform analysis
+        # Ensure data is loaded before proceeding
+        if deps.data is None or deps.stats is None:
+            raise ValueError("Data or statistics were not loaded successfully")
+        
+        # Perform analysis with the loaded data
         logger.info("Performing analysis...")
         analysis_result = await analyzer.run(
-            """
-            Please follow these steps:
-            1. Create a scatter plot with sepal_length vs sepal_width titled 'Sepal Dimensions'
-            2. Create a scatter plot with petal_length vs petal_width titled 'Petal Dimensions'
+            f"""
+            Using the loaded iris dataset with columns {deps.data.columns.tolist()}, please:
+            1. Create a scatter plot comparing sepal_length vs sepal_width titled 'Sepal Dimensions'
+            2. Create a scatter plot comparing petal_length vs petal_width titled 'Petal Dimensions'
             3. Perform correlation analysis between all numeric columns
             4. Return the analysis results including plot paths and correlations
             """,
             deps=deps
         )
-        logger.info(f"Analysis complete: {analysis_result.data}")
+        logger.info(f"Analysis complete: {analysis_result}")
         
-        # Generate report
+        # Generate report using the analysis results
         logger.info("Generating final report...")
         report_result = await reporter.run(
-            """
-            Please generate a comprehensive report about the Iris dataset analysis:
-            1. Include the dataset statistics from the preprocessing step
+            f"""
+            Using the preprocessed data and analysis results, please generate a comprehensive report:
+            1. Include the dataset statistics: {deps.stats}
             2. Add the plot paths from the analysis step
             3. Include the correlation analysis results
             4. Provide insights and recommendations based on the analysis
             """,
             deps=deps
         )
-        logger.info(f"Report generated: {report_result.data}")
+        logger.info(f"Report generated: {report_result}")
         
         logger.info("Disconnecting from server...")
         await server.disconnect()
