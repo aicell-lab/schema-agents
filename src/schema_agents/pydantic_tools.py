@@ -6,9 +6,15 @@ from pydantic import BaseModel, ValidationError
 
 from schema_agents.default_tools import FinalAnswerTool
 from schema_agents.tools import Tool
+from schema_agents.utils import FINAL_ANSWER_MARKER
 
 T = TypeVar('T', bound=BaseModel)
 
+class FinalAnswerException(Exception):
+    """Exception raised when the final_answer function is called."""
+    def __init__(self, answer: Any):
+        self.answer = answer
+        super().__init__(f"{FINAL_ANSWER_MARKER}: {answer.model_dump_json()}")
 
 class PydanticFinalAnswerTool(FinalAnswerTool):
     """A final answer tool that converts the answer to a Pydantic model.
@@ -97,7 +103,6 @@ The answer should be a valid JSON object with the following fields:
         converted_answer = self.forward(answer)
         
         # Raise FinalAnswerException with the converted answer
-        from schema_agents.local_python_executor import FinalAnswerException
         raise FinalAnswerException(converted_answer)
 
 

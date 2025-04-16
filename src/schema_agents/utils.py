@@ -35,6 +35,8 @@ if TYPE_CHECKING:
 
 __all__ = ["AgentError"]
 
+FINAL_ANSWER_MARKER = "##SCHEMA_AGENT_FINAL_ANSWER##:"
+DEFAULT_MAX_LEN_OUTPUT = 50000
 
 @lru_cache
 def _is_package_available(package_name: str) -> bool:
@@ -197,7 +199,7 @@ def parse_code_blobs(text: str) -> str:
                 It seems like you're trying to return the final answer, you can do it as follows:
                 Code:
                 ```py
-                final_answer("YOUR FINAL ANSWER HERE")
+                await final_answer("YOUR FINAL ANSWER HERE")
                 ```<end_code>
                 """
             ).strip()
@@ -456,3 +458,150 @@ def make_init_file(folder: str):
     # Create __init__
     with open(os.path.join(folder, "__init__.py"), "w"):
         pass
+
+class FinalAnswerException(Exception):
+    """Exception raised when the final_answer function is called."""
+    def __init__(self, answer):
+        self.answer = answer
+        super().__init__(f"{FINAL_ANSWER_MARKER}: {answer}")
+
+class MockPythonExecutor:
+    def __init__(self):
+        self.state = {}
+        self.tools = {}
+        self.logs = []
+        # Initialize print outputs container
+        self.state["_print_outputs"] = []
+        # Store local variables between runs
+        self._locals = {}
+
+    async def send_variables(self, variables):
+        self.state.update(variables)
+
+    async def send_tools(self, tools):
+        self.tools = tools
+
+    async def __call__(self, code_action):
+        # Create execution context with tools and variables
+        context = {**self.state}
+        for name, tool in self.tools.items():
+            context[name] = tool
+
+        # Set up string buffers for stdout and stderr
+        import io
+        import sys
+        from contextlib import redirect_stdout, redirect_stderr
+        stdout_buffer = io.StringIO()
+        stderr_buffer = io.StringIO()
+
+        try:
+            # Execute code with async support and capture output
+            import asyncio
+            exec_globals = {**context, 'asyncio': asyncio}
+            
+            # Wrap final_answer if present to handle FinalAnswerException: 
+            if "final_answer" in self.tools:
+                previous_final_answer = self.tools["final_answer"]
+                async def final_answer(answer):
+                    raise FinalAnswerException(await previous_final_answer(answer))
+                exec_globals["final_answer"] = final_answer
+            
+            # Add previous local variables to the execution context
+            exec_globals.update(self._locals)
+            
+            # Indent the code properly
+            function_code = "\n".join("    " + line for line in code_action.splitlines())
+            
+            # Wrap code to handle top-level await
+            wrapped_code = f"""
+async def __run():
+    # Initialize with previous local variables
+    locals().update({repr(self._locals)})
+{function_code}
+    # Return all local variables
+    return locals()
+"""
+            # Capture both stdout and stderr during compilation and execution
+            with redirect_stdout(stdout_buffer), redirect_stderr(stderr_buffer):
+                # Parse and execute the wrapped code
+                exec_code = compile(wrapped_code, '<string>', 'exec')
+                exec(exec_code, exec_globals)
+                
+                # Get the result by running the wrapper function
+                wrapper = exec_globals.get('__run')
+                if wrapper:
+                    try:
+                        loop = asyncio.get_running_loop()
+                        local_vars = await loop.create_task(wrapper())
+                    except RuntimeError:
+                        local_vars = await asyncio.create_task(wrapper())
+                else:
+                    local_vars = {}
+
+                # Update state with new variables, excluding special ones
+                if isinstance(local_vars, dict):
+                    # Update our stored locals for the next run
+                    self._locals.update({
+                        k: v for k, v in local_vars.items() 
+                        if not k.startswith('_')  # Skip special variables
+                    })
+                    # Also update the state
+                    self.state.update(self._locals)
+                
+                # The actual result should be in the last expression's value
+                result = local_vars.get('_return_value', None)
+            
+            # Combine stdout and stderr into logs
+            stdout_content = stdout_buffer.getvalue()
+            stderr_content = stderr_buffer.getvalue()
+            logs = stdout_content
+            if stderr_content:
+                if logs:
+                    logs += "\n"
+                logs += "STDERR:\n" + stderr_content
+            
+            logs = truncate_content(
+                logs, max_length=DEFAULT_MAX_LEN_OUTPUT
+            )
+            
+            # Return the result, logs, and final status
+            is_final = False
+            return result, logs, is_final
+
+        except Exception as e:
+            # Capture any output before the final answer
+            stdout_content = stdout_buffer.getvalue()
+            stderr_content = stderr_buffer.getvalue()
+            logs = stdout_content
+            if stderr_content:
+                if logs:
+                    logs += "\n"
+                logs += "STDERR:\n" + stderr_content
+            
+            logs = truncate_content(
+                logs, max_length=DEFAULT_MAX_LEN_OUTPUT
+            )
+            is_final_answer = True
+            return e.value, logs, is_final_answer
+
+        except Exception as e:
+            # Capture any error output
+            stdout_content = stdout_buffer.getvalue()
+            stderr_content = stderr_buffer.getvalue()
+            logs = stdout_content
+            if stderr_content:
+                if logs:
+                    logs += "\n"
+                logs += "STDERR:\n" + stderr_content
+            
+            logs = truncate_content(
+                logs, max_length=DEFAULT_MAX_LEN_OUTPUT
+            )
+            raise InterpreterError(
+                f"Code execution failed due to: {type(e).__name__}: {e}"
+            )
+            
+        finally:
+            # Clean up the buffers
+            stdout_buffer.close()
+            stderr_buffer.close()

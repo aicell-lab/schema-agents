@@ -19,11 +19,35 @@ from typing import Any, Dict, Optional
 
 from .local_python_executor import (
     BASE_BUILTIN_MODULES,
-    BASE_PYTHON_TOOLS,
-    evaluate_python_code,
+    LocalPythonExecutor,
 )
 from .tools import PipelineTool, Tool
+from .utils import FINAL_ANSWER_MARKER
 
+
+# Common Python built-in tools that are safe to include in interpreter sessions
+BASE_PYTHON_TOOLS = {
+    "print": print,
+    "min": min,
+    "max": max,
+    "sum": sum,
+    "len": len,
+    "range": range,
+    "enumerate": enumerate,
+    "zip": zip,
+    "list": list,
+    "dict": dict,
+    "set": set,
+    "tuple": tuple,
+    "int": int,
+    "float": float,
+    "str": str,
+    "bool": bool,
+    "abs": abs,
+    "round": round,
+    "sorted": sorted,
+    "reversed": reversed,
+}
 
 @dataclass
 class PreTool:
@@ -60,22 +84,22 @@ class PythonInterpreterTool(Tool):
                 ),
             }
         }
-        self.base_python_tools = BASE_PYTHON_TOOLS
-        self.python_evaluator = evaluate_python_code
+        self.python_executor = LocalPythonExecutor(additional_authorized_imports=self.authorized_imports)
         super().__init__(*args, **kwargs)
 
     def forward(self, code: str) -> str:
-        state = {}
-        output = str(
-            self.python_evaluator(
-                code,
-                state=state,
-                static_tools=self.base_python_tools,
-                authorized_imports=self.authorized_imports,
-            )[0]  # The second element is boolean is_final_answer
-        )
-        return f"Stdout:\n{str(state['_print_outputs'])}\nOutput: {output}"
+        import asyncio
+        try:
+            output, logs, is_final_answer = asyncio.run(self.python_executor(code))
+            return f"Stdout:\n{logs}\nOutput: {output if output is not None else 'None'}"
+        except Exception as e:
+            return f"Error: {str(e)}"
 
+class FinalAnswerException(Exception):
+    """Exception raised when the final_answer function is called."""
+    def __init__(self, answer: Any):
+        self.answer = answer
+        super().__init__(f"{FINAL_ANSWER_MARKER}: {answer}")
 
 class FinalAnswerTool(Tool):
     name = "final_answer"
@@ -93,9 +117,8 @@ class FinalAnswerTool(Tool):
         
     async def async_forward(self, answer: Any) -> Any:
         """Async version of forward that returns the answer directly."""
-        # Instead of raising an exception, just return the answer
-        # The caller will handle this as a final answer
-        return answer
+        raise FinalAnswerException(str(answer))
+
 
 
 class UserInputTool(Tool):

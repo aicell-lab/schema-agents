@@ -2,12 +2,34 @@ import asyncio
 import os
 from typing import Optional
 
-from pydantic import Field
+from pydantic import Field, BaseModel
 
 # Import necessary components from schema_agents
 from schema_agents.schema_tools import schema_tool
 from schema_agents import Agent
 from schema_agents.models import OpenAIServerModel
+from schema_agents.utils import truncate_content
+
+DEFAULT_MAX_LEN_OUTPUT = 50000
+
+# --- Define a Pydantic model for structured results ---
+class AnalysisResult(BaseModel):
+    """Structured result model for the agent's analysis."""
+    
+    expression_result: str = Field(
+        description="The result of the mathematical expression calculation"
+    )
+    weather_paris: str = Field(
+        description="The current weather in Paris"
+    )
+    weather_tokyo: str = Field(
+        description="The current weather in Tokyo"
+    )
+    summary: Optional[str] = Field(
+        None, 
+        description="Optional summary of the findings"
+    )
+
 
 # --- Tool Definitions ---
 # Define tools using the standalone @schema_tool decorator.
@@ -69,6 +91,13 @@ async def get_weather(
     print(f"✅ Weather Tool: Report = {weather_report}")
     return weather_report
 
+class InterpreterError(ValueError):
+    """
+    An error raised when the interpreter cannot evaluate a Python expression, due to syntax error or unsupported
+    operations.
+    """
+    pass
+
 # --- Agent Configuration and Execution ---
 async def main():
     """Configures and runs the schema agent."""
@@ -100,30 +129,35 @@ async def main():
     tools = [func.__tool__ for func in tool_functions]
     print(f"🔧 Available Tools: {[tool.name for tool in tools]}")
 
-    # 4. Create the Agent
-    # Using the base Agent class instead of ToolCallingAgent
-    print("🤖 Creating Agent...")
-    agent = Agent(
-        model=llm,
-        tools=tools,
-        verbosity_level=1, # Set to 1 (or higher) to see the agent's reasoning and tool calls
-    )
-
     # 5. Define the Task
     # A task that requires using both the calculator and weather tools.
-    task = "What is (5 + 13) * 2? Also, could you tell me the weather in Paris (in Fahrenheit) and Tokyo?"
+    task = """
+    Perform these tasks and return a structured result:
+    1. Calculate what is (5 + 13) * 2
+    2. Get the weather in Paris (in Fahrenheit)
+    3. Get the weather in Tokyo
+    
+    Your response should be a properly structured JSON object matching the AnalysisResult model.
+    """
     print(f"\n🚀 Running Agent for Task:")
     print(f"   '{task}'\n")
 
-    # 6. Run the Agent
+    # Create a new agent with string result type
+    string_agent = Agent(
+        model=llm,
+        tools=tools,
+        verbosity_level=1,
+        result_type=str  # Default result type
+    )
+    
     try:
-        # The agent will use the LLM to decide which tools to call,
-        # execute them, and formulate a final answer.
-        result = await agent.run(task)
-
-        print("\n--- Agent Finished ---")
-        print(f"💬 Final Answer:\n{result}")
-
+        string_result = await string_agent.run(task)
+        
+        print("\n--- Agent Finished (String Result) ---")
+        print(f"💬 Final Answer:")
+        print(f"  Type: {type(string_result)}")
+        print(f"  Content: {string_result}")
+        
     except Exception as e:
         print(f"\n--- Agent Error ---")
         print(f"❌ An error occurred during the agent run: {e}")
