@@ -480,7 +480,8 @@ class Role:
         tools,
         output_schema=None,
         thoughts_schema=None,
-        max_loop_count=10,
+        max_loop_count=20,
+        initial_max_loop=10,
         return_metadata=False,
         prompt=None,
         tool_usage_prompt=None,
@@ -489,7 +490,7 @@ class Role:
             assert hasattr(tool, '__is_tool__') and hasattr(tool, 'input_model'), f"Tool function `{tool.__name__}` must be decorated with `@tool`"
         output_schema = output_schema or str
         messages, _ = self._normalize_messages(req)
-        _max_loop = 5
+        _max_loop = initial_max_loop
 
         async def CompleteUserQuery(
             response: output_schema = Field(
